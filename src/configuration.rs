@@ -1,3 +1,5 @@
+use std::path::Path;
+
 #[derive(Debug, serde::Deserialize)]
 pub struct Settings {
     pub database: DatabaseSettings,
@@ -13,12 +15,29 @@ pub struct DatabaseSettings {
     pub database_name: String,
 }
 
+/// The configuration file's path is hard coded.
 pub fn get_configuration() -> Result<Settings, config::ConfigError> {
     config::Config::builder()
-        .add_source(config::File::with_name("configuration"))
+        .add_source(config::File::from(Path::new(
+            "/Users/caiyuanrui/zero2prod/configuration",
+        )))
         .build()
         .unwrap()
         .try_deserialize()
 }
 
-impl DatabaseSettings {}
+impl DatabaseSettings {
+    pub fn connection_string(&self) -> String {
+        format!(
+            "mysql://{}:{}@{}:{}/{}",
+            self.username, self.password, self.host, self.port, self.database_name
+        )
+    }
+
+    pub fn connection_string_without_db(&self) -> String {
+        format!(
+            "mysql://{}:{}@{}:{}",
+            self.username, self.password, self.host, self.port
+        )
+    }
+}
