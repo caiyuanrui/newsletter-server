@@ -1,0 +1,8 @@
+application_port = 8000
+
+[database]
+username = "zero2prod"
+password = "12345678"
+port = 3306
+host = "localhost"
+database_name = "newsletter"
