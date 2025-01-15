@@ -3,8 +3,18 @@ name = "zero2prod"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "zero2prod"
+path = "src/main.rs"
+
 [dependencies]
 axum = "0.8.1"
+hyper = "1.5.2"
+reqwest = "0.12.12"
 serde = { version = "1.0.217", features = ["derive"] }
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
+tower = "0.5.2"
 tracing-subscriber = "0.3.19"
