@@ -15,7 +15,7 @@ pub struct TestAPP {
 }
 
 static TRACING: LazyLock<()> = LazyLock::new(|| {
-    let default_filter_level = "info".to_string();
+    let default_filter_level = "debug".to_string();
     let subscriber_name = "test".to_string();
     match std::env::var("TEST_LOG") {
         Ok(_) => {

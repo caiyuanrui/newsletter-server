@@ -1,6 +1,4 @@
 use axum::{extract, http::StatusCode, response::IntoResponse};
-use chrono::Utc;
-use uuid::Uuid;
 
 use crate::data::Data;
 
@@ -11,7 +9,6 @@ pub struct FormData {
 }
 
 #[tracing::instrument(name = "Adding a new subscriber", skip(form, pool),fields(
-  request_id = %Uuid::new_v4(),
   subscriber_email = %form.email,
   subscriber_name = %form.name
 ))]
@@ -21,7 +18,7 @@ pub async fn subscribe(
 ) -> impl IntoResponse {
     match insert_subscriber(&pool, &form).await {
         Ok(_) => StatusCode::OK,
-        Err(e) => StatusCode::INTERNAL_SERVER_ERROR,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -38,10 +35,10 @@ pub async fn insert_subscriber(
 INSERT INTO subscriptions (id, email, name, subscribed_at)
 VALUES (?, ?, ?, ?)
 "#,
-        Uuid::new_v4().to_string(),
+        uuid::Uuid::new_v4().to_string(),
         form.email,
         form.name,
-        Utc::now()
+        chrono::Utc::now()
     )
     .execute(pool)
     .await
