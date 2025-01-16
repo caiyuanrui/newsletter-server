@@ -16,6 +16,7 @@ axum-server = "0.7.1"
 chrono = "0.4.39"
 config = "0.15.6"
 reqwest = "0.12.12"
+secrecy = { version = "0.10.3", features = ["serde"] }
 serde = { version = "1.0.217", features = ["derive"] }
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
 tower = "0.5.2"

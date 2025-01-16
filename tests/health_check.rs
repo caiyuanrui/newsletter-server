@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use secrecy::ExposeSecret;
 use uuid::Uuid;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
@@ -51,16 +52,17 @@ pub async fn configure_database(config: &DatabaseSettings) -> sqlx::MySqlPool {
     use sqlx::{Connection, Executor};
 
     // create database
-    let mut connection = sqlx::MySqlConnection::connect(&config.connection_string_without_db())
-        .await
-        .expect("Failed to connect to MySQL.");
+    let mut connection =
+        sqlx::MySqlConnection::connect(config.connection_string_without_db().expose_secret())
+            .await
+            .expect("Failed to connect to MySQL.");
     connection
         .execute(format!(r#"CREATE DATABASE {};"#, config.database_name).as_str())
         .await
         .expect("Failed to create database.");
 
     // migrate databse
-    let db_pool = sqlx::MySqlPool::connect(&config.connection_string())
+    let db_pool = sqlx::MySqlPool::connect(config.connection_string().expose_secret())
         .await
         .expect("Failed to connect to MySQL.");
     sqlx::migrate!("./migrations")
