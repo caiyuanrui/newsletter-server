@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use secrecy::ExposeSecret;
 use sqlx::mysql::MySqlPoolOptions;
 use tokio::net::TcpListener;
 
@@ -19,14 +18,14 @@ async fn main() -> std::io::Result<()> {
 
     let db_pool = MySqlPoolOptions::new()
         .acquire_timeout(Duration::from_secs(2))
-        .connect_lazy(configuration.database.connection_string().expose_secret())
-        .expect("Failed to connect to MySQL.");
-
+        .connect_lazy_with(configuration.database.with_db());
     let address = format!(
         "{}:{}",
         configuration.application.host, configuration.application.port
     );
     let listener = TcpListener::bind(address).await?;
+
+    println!("{:#?}", configuration.database);
 
     println!("server is running on {}", listener.local_addr().unwrap());
 
