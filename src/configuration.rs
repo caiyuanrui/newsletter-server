@@ -27,6 +27,7 @@ pub fn get_configuration() -> Result<Settings, config::ConfigError> {
 }
 
 impl DatabaseSettings {
+    /// The output goes like "mysql://username:password@host:port/database_name".
     pub fn connection_string(&self) -> String {
         format!(
             "mysql://{}:{}@{}:{}/{}",
@@ -34,6 +35,9 @@ impl DatabaseSettings {
         )
     }
 
+    /// The output goes like "mysql://username:password@host:port".
+    ///
+    /// Used for testing.
     pub fn connection_string_without_db(&self) -> String {
         format!(
             "mysql://{}:{}@{}:{}",

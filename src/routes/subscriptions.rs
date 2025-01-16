@@ -10,28 +10,43 @@ pub struct FormData {
     pub name: String,
 }
 
-// #[axum::debug_handler]
+#[tracing::instrument(name = "Adding a new subscriber", skip(form, pool),fields(
+  request_id = %Uuid::new_v4(),
+  subscriber_email = %form.email,
+  subscriber_name = %form.name
+))]
 pub async fn subscribe(
-    extract::State(db_pool): extract::State<Data<sqlx::MySqlPool>>,
+    extract::State(pool): extract::State<Data<sqlx::MySqlPool>>,
     form: extract::Form<FormData>,
 ) -> impl IntoResponse {
-    match sqlx::query!(
+    match insert_subscriber(&pool, &form).await {
+        Ok(_) => StatusCode::OK,
+        Err(e) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+#[tracing::instrument(
+    name = "Saving new subscriber details in the database",
+    skip(pool, form)
+)]
+pub async fn insert_subscriber(
+    pool: &sqlx::MySqlPool,
+    form: &FormData,
+) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {
+    sqlx::query!(
         r#"
-  INSERT INTO subscriptions (id, email, name, subscribed_at)
-  VALUES (?, ?, ?, ?)
-  "#,
+INSERT INTO subscriptions (id, email, name, subscribed_at)
+VALUES (?, ?, ?, ?)
+"#,
         Uuid::new_v4().to_string(),
         form.email,
         form.name,
         Utc::now()
     )
-    .execute(db_pool.get_ref())
+    .execute(pool)
     .await
-    {
-        Ok(_) => StatusCode::OK,
-        Err(e) => {
-            eprintln!("Failed to execute query: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
+    .map_err(|e| {
+        tracing::error!("Failed to execute query: {:?}", e);
+        e
+    })
 }

@@ -1,9 +1,10 @@
-use std::future::IntoFuture;
+use std::sync::LazyLock;
 
 use uuid::Uuid;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
     startup::run,
+    telementry::{get_subscriber, init_subscriber},
 };
 
 #[derive(Debug)]
@@ -12,7 +13,24 @@ pub struct TestAPP {
     pub db_pool: sqlx::MySqlPool,
 }
 
+static TRACING: LazyLock<()> = LazyLock::new(|| {
+    let default_filter_level = "info".to_string();
+    let subscriber_name = "test".to_string();
+    match std::env::var("TEST_LOG") {
+        Ok(_) => {
+            let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::stdout);
+            init_subscriber(subscriber);
+        }
+        Err(_) => {
+            let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::sink);
+            init_subscriber(subscriber);
+        }
+    }
+});
+
 async fn spawn_app() -> TestAPP {
+    LazyLock::force(&TRACING);
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("Failed to bind random port.");
@@ -23,8 +41,8 @@ async fn spawn_app() -> TestAPP {
     configuration.database.database_name = Uuid::new_v4().to_string().replace("-", "");
     let db_pool = configure_database(&configuration.database).await;
 
-    let serve = run(listener, db_pool.clone());
-    tokio::spawn(serve.into_future());
+    let server = run(listener, db_pool.clone());
+    tokio::spawn(server);
 
     TestAPP { address, db_pool }
 }
