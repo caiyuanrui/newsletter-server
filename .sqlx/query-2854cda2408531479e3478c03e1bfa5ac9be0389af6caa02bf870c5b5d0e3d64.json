@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\nINSERT INTO subscriptions (id, email, name, subscribed_at)\nVALUES (?, ?, ?, ?)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "2854cda2408531479e3478c03e1bfa5ac9be0389af6caa02bf870c5b5d0e3d64"
+}
