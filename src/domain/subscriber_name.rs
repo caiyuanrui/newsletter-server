@@ -9,11 +9,13 @@ impl SubscriberName {
     ];
     /// # Panics
     /// If the provided name is empty, longer than 256 characters, or contains any of the following characters: `/`, `\\`, `<`, `>`, `"`, `|`, `?`, `*`, `:`, `;`, `,`, `(`, `)`.
-    pub fn parse(s: String) -> Result<Self, String> {
-        let is_empty_or_whitespace = s.trim().is_empty();
-        let is_too_long = s.graphemes(true).count() > 256;
+    pub fn parse(name: String) -> Result<Self, String> {
+        let is_empty_or_whitespace = name.trim().is_empty();
+        let is_too_long = name.graphemes(true).count() > 256;
 
-        let has_forbidden_characters = s.chars().any(|ch| Self::FORBIDDEN_CHARACTERS.contains(&ch));
+        let has_forbidden_characters = name
+            .chars()
+            .any(|ch| Self::FORBIDDEN_CHARACTERS.contains(&ch));
 
         if is_empty_or_whitespace {
             Err("Name is empty.".to_string())
@@ -22,7 +24,7 @@ impl SubscriberName {
         } else if has_forbidden_characters {
             Err("Name contains forbidden characters.".to_string())
         } else {
-            Ok(Self(s))
+            Ok(Self(name))
         }
     }
 
