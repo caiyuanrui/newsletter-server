@@ -11,6 +11,16 @@ pub struct FormData {
     pub name: String,
 }
 
+impl TryFrom<FormData> for NewSubscriber {
+    type Error = String;
+
+    fn try_from(form: FormData) -> Result<Self, Self::Error> {
+        let name = domain::SubscriberName::parse(form.name)?;
+        let email = domain::SubscriberEmail::parse(form.email)?;
+        Ok(NewSubscriber { email, name })
+    }
+}
+
 #[tracing::instrument(name = "Adding a new subscriber", skip(form, pool),fields(
   subscriber_email = %form.email,
   subscriber_name = %form.name
@@ -19,23 +29,10 @@ pub async fn subscribe(
     extract::State(pool): extract::State<Data<sqlx::MySqlPool>>,
     form: extract::Form<FormData>,
 ) -> impl IntoResponse {
-    let name = match domain::SubscriberName::parse(form.0.name) {
-        Ok(name) => name,
-        Err(e) => {
-            tracing::info!("Failed to parse the subscriber's name: {}", e);
-            return StatusCode::BAD_REQUEST;
-        }
+    let new_subscriber = match form.0.try_into() {
+        Ok(subscriber) => subscriber,
+        Err(_) => return StatusCode::BAD_REQUEST,
     };
-
-    let email = match domain::SubscriberEmail::parse(form.0.email) {
-        Ok(email) => email,
-        Err(e) => {
-            tracing::info!("Failed to parse the subscriber's email: {}", e);
-            return StatusCode::BAD_REQUEST;
-        }
-    };
-
-    let new_subscriber = domain::NewSubscriber { email, name };
     match insert_subscriber(&pool, &new_subscriber).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
