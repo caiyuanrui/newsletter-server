@@ -49,3 +49,6 @@ features = [
 strip = true
 lto = true
 codegen-units = 1
+
+[dev-dependencies]
+claim = "0.5.0"

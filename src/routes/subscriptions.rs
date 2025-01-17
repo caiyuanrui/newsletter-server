@@ -21,7 +21,7 @@ pub async fn subscribe(
 ) -> impl IntoResponse {
     let new_subscriber = domain::NewSubscriber {
         email: form.0.email,
-        name: domain::SubscriberName::parse(form.0.name),
+        name: domain::SubscriberName::parse(form.0.name).expect("Name validation failed."),
     };
     match insert_subscriber(&pool, &new_subscriber).await {
         Ok(_) => StatusCode::OK,
