@@ -19,10 +19,23 @@ pub async fn subscribe(
     extract::State(pool): extract::State<Data<sqlx::MySqlPool>>,
     form: extract::Form<FormData>,
 ) -> impl IntoResponse {
-    let new_subscriber = domain::NewSubscriber {
-        email: form.0.email,
-        name: domain::SubscriberName::parse(form.0.name).expect("Name validation failed."),
+    let name = match domain::SubscriberName::parse(form.0.name) {
+        Ok(name) => name,
+        Err(e) => {
+            tracing::info!("Failed to parse the subscriber's name: {}", e);
+            return StatusCode::BAD_REQUEST;
+        }
     };
+
+    let email = match domain::SubscriberEmail::parse(form.0.email) {
+        Ok(email) => email,
+        Err(e) => {
+            tracing::info!("Failed to parse the subscriber's email: {}", e);
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+
+    let new_subscriber = domain::NewSubscriber { email, name };
     match insert_subscriber(&pool, &new_subscriber).await {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -43,7 +56,7 @@ INSERT INTO subscriptions (id, email, name, subscribed_at)
 VALUES (?, ?, ?, ?)
 "#,
         uuid::Uuid::new_v4().to_string(),
-        new_subscriber.email,
+        new_subscriber.email.as_ref(),
         new_subscriber.name.as_ref(),
         chrono::Utc::now()
     )

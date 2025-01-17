@@ -54,9 +54,9 @@ pub async fn configure_database(config: &DatabaseSettings) -> sqlx::MySqlPool {
         .await
         .expect("Failed to connect to MySQL.");
     connection
-        .execute(format!(r#"CREATE DATABASE {};"#, config.database_name).as_str())
+        .execute(format!(r#"CREATE DATABASE `{}`;"#, config.database_name).as_str())
         .await
-        .expect("Failed to create database.");
+        .unwrap_or_else(|_| panic!("Failed to create database {}.", config.database_name));
 
     // migrate databse
     let db_pool = sqlx::MySqlPool::connect_with(config.with_db())
