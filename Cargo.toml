@@ -15,8 +15,6 @@ axum = { version = "0.8.1", features = ["macros"] }
 axum-server = "0.7.1"
 chrono = "0.4.39"
 config = "0.15.6"
-rand = "0.8.5"
-rand_core = "0.6.4"
 reqwest = "0.12.12"
 secrecy = { version = "0.10.3", features = ["serde"] }
 serde = { version = "1.0.217", features = ["derive"] }
@@ -58,3 +56,5 @@ claim = "0.5.0"
 fake = "3.1.0"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
+rand = "0.8.5"
+rand_core = "0.6.4"

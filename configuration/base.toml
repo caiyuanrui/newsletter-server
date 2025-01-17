@@ -9,3 +9,7 @@ database_name = "newsletter"
 port = 8000
 host = "127.0.0.1"
 require_ssl = false
+
+[email_client]
+base_url = "localhost"
+sender_email = "test@gmail.com"

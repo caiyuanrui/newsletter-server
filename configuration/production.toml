@@ -4,3 +4,7 @@ host = "0.0.0.0"
 [database]
 require_ssl = true
 host = "host.docker.internal"
+
+[email_client]
+base_url = "https://api.postmarkerapp.com"
+sender_email = "caiyuanrui@sjtu.edu.cn"

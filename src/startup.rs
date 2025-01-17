@@ -7,16 +7,17 @@ use axum::{
     Router,
 };
 use axum_server::Server;
-use tokio::net::TcpListener;
+use std::net::TcpListener;
 use tower_http::trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse};
 use tracing::Level;
 
 use crate::{
     data::Data,
+    email_client::EmailClient,
     routes::{health_check, subscribe},
 };
 
-fn app(db_pool: Data<sqlx::MySqlPool>) -> Router {
+fn app(db_pool: Data<sqlx::MySqlPool>, client: EmailClient) -> Router {
     Router::new()
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
@@ -28,14 +29,16 @@ fn app(db_pool: Data<sqlx::MySqlPool>) -> Router {
                 .on_failure(DefaultOnFailure::new()),
         )
         .with_state(db_pool)
+        .with_state(Data::new(client))
 }
 
 pub fn run(
     listener: TcpListener,
     db_pool: sqlx::MySqlPool,
+    client: EmailClient,
 ) -> impl Future<Output = std::io::Result<()>> {
-    let app = app(Data::new(db_pool));
-    Server::from_tcp(listener.into_std().unwrap()).serve(app.into_make_service())
+    let app = app(Data::new(db_pool), client);
+    Server::from_tcp(listener).serve(app.into_make_service())
 }
 
 fn make_default_span() -> impl Fn(&Request<Body>) -> tracing::Span + Clone {

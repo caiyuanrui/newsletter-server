@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use sqlx::mysql::MySqlPoolOptions;
-use tokio::net::TcpListener;
+use std::net::TcpListener;
 
 use zero2prod::{
     configuration::get_configuration,
@@ -23,7 +23,7 @@ async fn main() -> std::io::Result<()> {
         "{}:{}",
         configuration.application.host, configuration.application.port
     );
-    let listener = TcpListener::bind(address).await?;
+    let listener = TcpListener::bind(address)?;
 
     println!("{:#?}", configuration.database);
 

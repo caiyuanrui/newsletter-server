@@ -2,10 +2,13 @@ use secrecy::ExposeSecret;
 use serde_aux::field_attributes::{deserialize_bool_from_anything, deserialize_number_from_string};
 use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
 
+use crate::domain::SubscriberEmail;
+
 #[derive(Debug, serde::Deserialize)]
 pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
+    pub email_client: EmailClientSettings,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -25,6 +28,18 @@ pub struct ApplicationSettings {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
     pub host: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct EmailClientSettings {
+    pub base_url: String,
+    pub sender_email: String,
+}
+
+impl EmailClientSettings {
+    pub fn sender(&self) -> Result<SubscriberEmail, String> {
+        SubscriberEmail::parse(self.sender_email.clone())
+    }
 }
 
 pub fn get_configuration() -> Result<Settings, config::ConfigError> {
