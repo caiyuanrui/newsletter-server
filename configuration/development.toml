@@ -4,3 +4,7 @@ host = "127.0.0.1"
 [database]
 require_ssl = false
 host = "localhost"
+
+[email_client]
+base_url = "https://api.postmarkerapp.com"
+sender_email = "caiyuanrui@sjtu.edu.cn"

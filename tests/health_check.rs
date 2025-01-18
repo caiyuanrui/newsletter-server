@@ -2,6 +2,7 @@ use std::sync::LazyLock;
 
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
+    email_client::EmailClient,
     startup::run,
     telementry::{get_subscriber, init_subscriber},
 };
@@ -36,9 +37,23 @@ async fn spawn_app() -> TestAPP {
 
     let mut configuration = get_configuration().expect("Failed to read configuration.");
     configuration.database.database_name = uuid::Uuid::new_v4().to_string().replace("-", "");
+
+    let sender_email = configuration
+        .email_client
+        .sender()
+        .expect("Failed to parse the email name of the sender");
+    let url = configuration
+        .email_client
+        .base_url
+        .as_str()
+        .try_into()
+        .unwrap();
+    let authorization_token = configuration.email_client.authorization_token;
+    let email_client = EmailClient::new(url, sender_email, authorization_token);
+
     let db_pool = configure_database(&configuration.database).await;
 
-    let server = run(listener, db_pool.clone());
+    let server = run(listener, db_pool.clone(), email_client);
     tokio::spawn(server);
 
     TestAPP { address, db_pool }

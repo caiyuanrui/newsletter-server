@@ -1,4 +1,4 @@
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use serde_aux::field_attributes::{deserialize_bool_from_anything, deserialize_number_from_string};
 use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
 
@@ -33,7 +33,8 @@ pub struct ApplicationSettings {
 #[derive(Debug, serde::Deserialize)]
 pub struct EmailClientSettings {
     pub base_url: String,
-    pub sender_email: String,
+    sender_email: String,
+    pub authorization_token: SecretString,
 }
 
 impl EmailClientSettings {
