@@ -1,4 +1,8 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    borrow::Cow,
+    ops::{Deref, DerefMut},
+    time::Duration,
+};
 
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
@@ -47,6 +51,9 @@ impl EmailClient {
         }
     }
 
+    /// # Errors
+    ///
+    /// This function will timeout if 10 seconds has elasped.
     pub async fn send_email(
         &self,
         recipient: SubscriberEmail,
@@ -56,39 +63,42 @@ impl EmailClient {
     ) -> Result<reqwest::Response, reqwest::Error> {
         let url = self.base_url.join("email").unwrap();
         let request_body = SendEmailRequest {
-            from: self.sender.as_ref().to_owned(),
-            to: recipient.as_ref().to_owned(),
-            subject: subject.to_owned(),
-            text_body: text_content.to_owned(),
-            html_body: html_content.to_owned(),
+            from: Cow::Borrowed(self.sender.as_ref()),
+            to: Cow::Borrowed(recipient.as_ref()),
+            subject: Cow::Borrowed(subject),
+            text_body: Cow::Borrowed(text_content),
+            html_body: Cow::Borrowed(html_content),
             message_stream: None,
         };
         self.http_client
             .post(url)
+            .timeout(Duration::from_secs(10))
             .header(
                 "X-Postmark-Server-Token",
                 self.authorization_token.expose_secret(),
             )
             .json(&request_body)
             .send()
-            .await
+            .await?
+            .error_for_status()
     }
 }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct SendEmailRequest {
-    from: String,
-    to: String,
-    subject: String,
-    text_body: String,
-    html_body: String,
-    message_stream: Option<String>,
+struct SendEmailRequest<'a> {
+    from: Cow<'a, str>,
+    to: Cow<'a, str>,
+    subject: Cow<'a, str>,
+    text_body: Cow<'a, str>,
+    html_body: Cow<'a, str>,
+    message_stream: Option<Cow<'a, str>>,
 }
 
 #[cfg(test)]
 mod tests {
 
+    use claim::{assert_err, assert_ok};
     use fake::{
         faker::{
             internet::en::SafeEmail,
@@ -97,6 +107,7 @@ mod tests {
         Fake, Faker,
     };
     use reqwest::Method;
+    use std::time::Duration;
     use wiremock::{matchers, Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -149,5 +160,95 @@ mod tests {
             .await;
 
         // Assert
+    }
+
+    #[tokio::test]
+    async fn send_email_succeeds_if_the_server_returns_200() {
+        let mock_server = MockServer::start().await;
+        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
+        let url = mock_server.uri().as_str().try_into().unwrap();
+        let email_client = EmailClient::new(
+            url,
+            sender,
+            SecretString::new(Faker.fake::<String>().into_boxed_str()),
+        );
+
+        // The MockServer iterates all the mounted mocks to check if the request matched the condition.
+        Mock::given(matchers::any())
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
+        let subject: String = Sentence(1..2).fake();
+        let content: String = Paragraph(1..10).fake();
+
+        let outcome = email_client
+            .send_email(subscriber_email, &subject, &content, &content)
+            .await;
+
+        // Assert
+        assert_ok!(outcome);
+    }
+
+    #[tokio::test]
+    async fn send_email_failes_if_the_server_returns_500() {
+        let mock_server = MockServer::start().await;
+        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
+        let url = mock_server.uri().as_str().try_into().unwrap();
+        let email_client = EmailClient::new(
+            url,
+            sender,
+            SecretString::new(Faker.fake::<String>().into_boxed_str()),
+        );
+
+        // The MockServer iterates all the mounted mocks to check if the request matched the condition.
+        Mock::given(matchers::any())
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
+        let subject: String = Sentence(1..2).fake();
+        let content: String = Paragraph(1..10).fake();
+
+        let outcome = email_client
+            .send_email(subscriber_email, &subject, &content, &content)
+            .await;
+
+        // Assert
+        assert_err!(outcome);
+    }
+
+    #[tokio::test]
+    async fn send_email_times_out_if_the_server_takes_too_long() {
+        let mock_server = MockServer::start().await;
+        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
+        let url = mock_server.uri().as_str().try_into().unwrap();
+        let email_client = EmailClient::new(
+            url,
+            sender,
+            SecretString::new(Faker.fake::<String>().into_boxed_str()),
+        );
+
+        // The MockServer iterates all the mounted mocks to check if the request matched the condition.
+        Mock::given(matchers::any())
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(180)))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
+        let subject: String = Sentence(1..2).fake();
+        let content: String = Paragraph(1..10).fake();
+
+        let outcome = email_client
+            .send_email(subscriber_email, &subject, &content, &content)
+            .await;
+
+        // Assert
+        assert_err!(outcome);
     }
 }
