@@ -1,41 +1,30 @@
-use axum::{extract, http::StatusCode, response::IntoResponse};
+use axum::{
+    extract::{rejection::FormRejection, FromRequest, State},
+    http,
+    response::IntoResponse,
+};
+use serde_json::json;
 
 use crate::{
     domain::{self, NewSubscriber},
     utils::Data,
 };
 
-#[derive(serde::Deserialize)]
-pub struct FormData {
-    pub email: String,
-    pub name: String,
-}
-
-impl TryFrom<FormData> for NewSubscriber {
-    type Error = String;
-
-    fn try_from(form: FormData) -> Result<Self, Self::Error> {
-        let name = domain::SubscriberName::parse(form.name)?;
-        let email = domain::SubscriberEmail::parse(form.email)?;
-        Ok(NewSubscriber { email, name })
-    }
-}
-
 #[tracing::instrument(name = "Adding a new subscriber", skip(form, pool),fields(
   subscriber_email = %form.email,
   subscriber_name = %form.name
 ))]
 pub async fn subscribe(
-    extract::State(pool): extract::State<Data<sqlx::MySqlPool>>,
-    form: extract::Form<FormData>,
+    State(pool): State<Data<sqlx::MySqlPool>>,
+    Form(form): Form<FormData>,
 ) -> impl IntoResponse {
-    let new_subscriber = match form.0.try_into() {
+    let new_subscriber = match form.try_into() {
         Ok(subscriber) => subscriber,
-        Err(_) => return StatusCode::BAD_REQUEST,
+        Err(_) => return http::StatusCode::BAD_REQUEST,
     };
     match insert_subscriber(&pool, &new_subscriber).await {
-        Ok(_) => StatusCode::OK,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        Ok(_) => http::StatusCode::OK,
+        Err(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -63,4 +52,55 @@ VALUES (?, ?, ?, ?)
         tracing::error!("Failed to execute query: {:?}", e);
         e
     })
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct FormData {
+    pub email: String,
+    pub name: String,
+}
+
+impl TryFrom<FormData> for NewSubscriber {
+    type Error = String;
+
+    fn try_from(form: FormData) -> Result<Self, Self::Error> {
+        let name = domain::SubscriberName::parse(form.name)?;
+        let email = domain::SubscriberEmail::parse(form.email)?;
+        Ok(NewSubscriber { email, name })
+    }
+}
+
+#[derive(FromRequest)]
+#[from_request(via(axum::Form), rejection(ApiError))]
+pub struct Form<T>(T);
+
+#[derive(Debug)]
+pub struct ApiError {
+    status: http::StatusCode,
+    message: String,
+}
+
+impl From<FormRejection> for ApiError {
+    fn from(rejection: FormRejection) -> Self {
+        Self {
+            // failed to extract into Form
+            status: if rejection.status() == http::StatusCode::UNPROCESSABLE_ENTITY {
+                http::StatusCode::NOT_FOUND
+            } else {
+                rejection.status()
+            },
+            message: rejection.body_text(),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        let payload = json!({
+          "message": self.message,
+          "origin": "derive_from_request"
+        });
+
+        (self.status, axum::Json(payload)).into_response()
+    }
 }

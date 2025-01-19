@@ -2,17 +2,9 @@ use std::sync::LazyLock;
 
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
-    email_client::EmailClient,
-    startup::run,
     startup::Application,
     telementry::{get_subscriber, init_subscriber},
 };
-
-#[derive(Debug)]
-pub struct TestAPP {
-    pub address: String,
-    pub db_pool: sqlx::MySqlPool,
-}
 
 static TRACING: LazyLock<()> = LazyLock::new(|| {
     let default_filter_level = "debug".to_string();
@@ -29,47 +21,50 @@ static TRACING: LazyLock<()> = LazyLock::new(|| {
     }
 });
 
+#[derive(Debug)]
+pub struct TestAPP {
+    pub address: String,
+    pub db_pool: sqlx::MySqlPool,
+}
+
+impl TestAPP {
+    pub async fn post_subscriptions(
+        &self,
+        body: impl Into<reqwest::Body>,
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        reqwest::Client::new()
+            .post(format!("{}/subscriptions", &self.address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+    }
+}
+
 pub async fn spawn_app() -> TestAPP {
     LazyLock::force(&TRACING);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    let configuration = {
+        let mut c = get_configuration().expect("Failed to read configuration.");
+        c.database.database_name = uuid::Uuid::new_v4().to_string().replace("-", "");
+        c.application.port = 0;
+        c
+    };
+
+    configure_database(&configuration.database).await;
+
+    let app = Application::build(&configuration)
         .await
-        .expect("Failed to bind random port.");
-    let port = listener.local_addr().unwrap().port();
-    let address = format!("http://127.0.0.1:{port}");
+        .expect("Failed to build the test application");
+    let address = format!("http://127.0.0.1:{}", app.port());
+    let db_pool = app.db_pool();
 
-    let mut configuration = get_configuration().expect("Failed to read configuration.");
-    configuration.database.database_name = uuid::Uuid::new_v4().to_string().replace("-", "");
-    configuration.application.port = 0;
-
-    let sender_email = configuration
-        .email_client
-        .sender()
-        .expect("Failed to parse the email name of the sender");
-    let url = configuration
-        .email_client
-        .base_url
-        .as_str()
-        .try_into()
-        .unwrap();
-    let timeout = configuration.email_client.timeout();
-    let authorization_token = configuration.email_client.authorization_token;
-    let email_client = EmailClient::new(url, sender_email, authorization_token, timeout);
-
-    let db_pool = configure_database(&configuration.database).await;
-
-    let server = run(listener, db_pool.clone(), email_client);
-    tokio::spawn(server);
-
-    // let app = Application::build(&configuration).await.unwrap();
-    // let address = format!("http://localhost:{}", app.port());
-    // let db_pool = app.db_pool().clone();
-    // tokio::spawn(app.run());
+    tokio::spawn(app.run());
 
     TestAPP { address, db_pool }
 }
 
-pub async fn configure_database(config: &DatabaseSettings) -> sqlx::MySqlPool {
+async fn configure_database(config: &DatabaseSettings) {
     use sqlx::{Connection, Executor};
 
     // create database
@@ -79,16 +74,14 @@ pub async fn configure_database(config: &DatabaseSettings) -> sqlx::MySqlPool {
     connection
         .execute(format!(r#"CREATE DATABASE `{}`;"#, config.database_name).as_str())
         .await
-        .unwrap_or_else(|_| panic!("Failed to create database {}.", config.database_name));
+        .unwrap_or_else(|_| panic!("Failed to create test database {}", config.database_name));
 
     // migrate databse
-    let db_pool = sqlx::MySqlPool::connect_with(config.with_db())
+    let mut connection = sqlx::MySqlConnection::connect_with(&config.with_db())
         .await
         .expect("Failed to connect to MySQL.");
     sqlx::migrate!("./migrations")
-        .run(&db_pool)
+        .run(&mut connection)
         .await
         .expect("Failed to migrate the databse.");
-
-    db_pool
 }

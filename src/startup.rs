@@ -1,15 +1,18 @@
 use std::{future::IntoFuture, time::Duration};
 
 use axum::{
-    body::Body,
-    http::Request,
+    body::{Body, Bytes},
+    extract::Request,
+    http,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 
+use http_body_util::BodyExt;
+
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
-use tower_http::trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse};
-use tracing::Level;
 
 use crate::configuration::DatabaseSettings;
 
@@ -69,8 +72,8 @@ impl Application {
         self.port
     }
 
-    pub fn db_pool(&self) -> &MySqlPool {
-        &self.db_pool
+    pub fn db_pool(&self) -> MySqlPool {
+        self.db_pool.clone()
     }
 }
 
@@ -80,35 +83,52 @@ fn get_connection_pool(config: &DatabaseSettings) -> MySqlPool {
         .connect_lazy_with(config.with_db())
 }
 
-pub fn run(
-    listener: tokio::net::TcpListener,
-    db_pool: sqlx::MySqlPool,
-    client: EmailClient,
-) -> Server {
+fn run(listener: tokio::net::TcpListener, db_pool: sqlx::MySqlPool, client: EmailClient) -> Server {
     let app = Router::new()
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
-        .layer(
-            tower_http::trace::TraceLayer::new_for_http()
-                .make_span_with(default_span)
-                .on_request(DefaultOnRequest::new())
-                .on_response(DefaultOnResponse::new())
-                .on_failure(DefaultOnFailure::new()),
-        )
+        .layer(middleware::from_fn(print_request_response))
         .with_state(Data::new(db_pool))
         .with_state(Data::new(client));
 
     Server::new(axum::serve(listener, app).into_future())
 }
 
-fn default_span(request: &Request<Body>) -> tracing::Span {
-    let request_id = uuid::Uuid::new_v4();
-    tracing::span!(
-        Level::DEBUG,
-        "request",
-        method = tracing::field::display(request.method()),
-        uri = tracing::field::display(request.uri()),
-        version = tracing::field::debug(request.version()),
-        request_id = tracing::field::display(request_id),
-    )
+async fn print_request_response(
+    req: Request,
+    next: Next,
+) -> Result<impl IntoResponse, (http::StatusCode, String)> {
+    let (parts, body) = req.into_parts();
+    let bytes = buffer_and_print("request", body).await?;
+    let req = Request::from_parts(parts, Body::from(bytes));
+
+    let res = next.run(req).await;
+
+    let (parts, body) = res.into_parts();
+    let bytes = buffer_and_print("response", body).await?;
+    let res = Response::from_parts(parts, Body::from(bytes));
+
+    Ok(res)
+}
+
+async fn buffer_and_print<B>(direction: &str, body: B) -> Result<Bytes, (http::StatusCode, String)>
+where
+    B: axum::body::HttpBody<Data = Bytes>,
+    B::Error: std::fmt::Display,
+{
+    let bytes = match body.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(err) => {
+            return Err((
+                http::StatusCode::BAD_REQUEST,
+                format!("failed to read {direction} body: {err}"),
+            ))
+        }
+    };
+
+    if let Ok(body) = std::str::from_utf8(&bytes) {
+        tracing::debug!("{direction} body = {body:?}");
+    }
+
+    Ok(bytes)
 }
