@@ -1,8 +1,8 @@
 use axum::{extract, http::StatusCode, response::IntoResponse};
 
 use crate::{
-    data::Data,
     domain::{self, NewSubscriber},
+    utils::Data,
 };
 
 #[derive(serde::Deserialize)]
