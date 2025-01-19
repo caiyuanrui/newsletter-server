@@ -14,3 +14,4 @@ require_ssl = false
 base_url = "localhost"
 sender_email = "test@gmail.com"
 authorization_token = "5eca3b81-5353-45d4-8514-c6cfc90c331f"
+timeout_milliseconds = 10000

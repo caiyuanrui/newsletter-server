@@ -42,9 +42,17 @@ impl TryFrom<&str> for Url {
 }
 
 impl EmailClient {
-    pub fn new(base_url: Url, sender: SubscriberEmail, authorization_token: SecretString) -> Self {
+    pub fn new(
+        base_url: Url,
+        sender: SubscriberEmail,
+        authorization_token: SecretString,
+        time_out: Duration,
+    ) -> Self {
         Self {
-            http_client: Client::new(),
+            http_client: Client::builder()
+                .timeout(time_out)
+                .build()
+                .expect("Failed to build the email client"),
             base_url,
             sender,
             authorization_token,
@@ -72,7 +80,6 @@ impl EmailClient {
         };
         self.http_client
             .post(url)
-            .timeout(Duration::from_secs(10))
             .header(
                 "X-Postmark-Server-Token",
                 self.authorization_token.expose_secret(),
@@ -130,19 +137,35 @@ mod tests {
         }
     }
 
+    fn subject() -> String {
+        Sentence(1..2).fake()
+    }
+
+    fn content() -> String {
+        Paragraph(1..10).fake()
+    }
+
+    fn email() -> SubscriberEmail {
+        SubscriberEmail::parse(SafeEmail().fake()).unwrap()
+    }
+
+    fn email_client(base_url: Url) -> EmailClient {
+        EmailClient::new(
+            base_url,
+            email(),
+            SecretString::new(Faker.fake::<String>().into_boxed_str()),
+            Duration::from_millis(200),
+        )
+    }
+
     #[tokio::test]
     async fn send_email_sends_the_expected_request() {
         let mock_server = MockServer::start().await;
-        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let url = mock_server.uri().as_str().try_into().unwrap();
-        let email_client = EmailClient::new(
-            url,
-            sender,
-            SecretString::new(Faker.fake::<String>().into_boxed_str()),
-        );
+        let email_client = email_client(mock_server.uri().as_str().try_into().unwrap());
 
         // The MockServer iterates all the mounted mocks to check if the request matched the condition.
         Mock::given(matchers::header_exists("X-Postmark-Server-Token"))
+            .and(matchers::header("Content-Type", "application/json"))
             .and(matchers::path("/email"))
             .and(matchers::method(Method::POST))
             .and(SendEmailBodyMatcher)
@@ -151,12 +174,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let subject: String = Sentence(1..2).fake();
-        let content: String = Paragraph(1..10).fake();
-
+        let content = content();
         let _ = email_client
-            .send_email(subscriber_email, &subject, &content, &content)
+            .send_email(email(), &subject(), &content, &content)
             .await;
 
         // Assert
@@ -165,13 +185,7 @@ mod tests {
     #[tokio::test]
     async fn send_email_succeeds_if_the_server_returns_200() {
         let mock_server = MockServer::start().await;
-        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let url = mock_server.uri().as_str().try_into().unwrap();
-        let email_client = EmailClient::new(
-            url,
-            sender,
-            SecretString::new(Faker.fake::<String>().into_boxed_str()),
-        );
+        let email_client = email_client(mock_server.uri().as_str().try_into().unwrap());
 
         // The MockServer iterates all the mounted mocks to check if the request matched the condition.
         Mock::given(matchers::any())
@@ -180,12 +194,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let subject: String = Sentence(1..2).fake();
-        let content: String = Paragraph(1..10).fake();
-
+        let content = content();
         let outcome = email_client
-            .send_email(subscriber_email, &subject, &content, &content)
+            .send_email(email(), &subject(), &content, &content)
             .await;
 
         // Assert
@@ -195,13 +206,7 @@ mod tests {
     #[tokio::test]
     async fn send_email_failes_if_the_server_returns_500() {
         let mock_server = MockServer::start().await;
-        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let url = mock_server.uri().as_str().try_into().unwrap();
-        let email_client = EmailClient::new(
-            url,
-            sender,
-            SecretString::new(Faker.fake::<String>().into_boxed_str()),
-        );
+        let email_client = email_client(mock_server.uri().as_str().try_into().unwrap());
 
         // The MockServer iterates all the mounted mocks to check if the request matched the condition.
         Mock::given(matchers::any())
@@ -210,12 +215,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let subject: String = Sentence(1..2).fake();
-        let content: String = Paragraph(1..10).fake();
-
+        let content = content();
         let outcome = email_client
-            .send_email(subscriber_email, &subject, &content, &content)
+            .send_email(email(), &subject(), &content, &content)
             .await;
 
         // Assert
@@ -225,13 +227,7 @@ mod tests {
     #[tokio::test]
     async fn send_email_times_out_if_the_server_takes_too_long() {
         let mock_server = MockServer::start().await;
-        let sender = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let url = mock_server.uri().as_str().try_into().unwrap();
-        let email_client = EmailClient::new(
-            url,
-            sender,
-            SecretString::new(Faker.fake::<String>().into_boxed_str()),
-        );
+        let email_client = email_client(mock_server.uri().as_str().try_into().unwrap());
 
         // The MockServer iterates all the mounted mocks to check if the request matched the condition.
         Mock::given(matchers::any())
@@ -240,12 +236,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let subscriber_email = SubscriberEmail::parse(SafeEmail().fake()).unwrap();
-        let subject: String = Sentence(1..2).fake();
-        let content: String = Paragraph(1..10).fake();
+        let content = content();
 
         let outcome = email_client
-            .send_email(subscriber_email, &subject, &content, &content)
+            .send_email(email(), &subject(), &content, &content)
             .await;
 
         // Assert

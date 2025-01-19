@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use secrecy::{ExposeSecret, SecretString};
 use serde_aux::field_attributes::{deserialize_bool_from_anything, deserialize_number_from_string};
 use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
@@ -35,11 +37,16 @@ pub struct EmailClientSettings {
     pub base_url: String,
     sender_email: String,
     pub authorization_token: SecretString,
+    timeout_milliseconds: u64,
 }
 
 impl EmailClientSettings {
     pub fn sender(&self) -> Result<SubscriberEmail, String> {
         SubscriberEmail::parse(self.sender_email.clone())
+    }
+
+    pub fn timeout(&self) -> Duration {
+        Duration::from_millis(self.timeout_milliseconds)
     }
 }
 

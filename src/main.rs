@@ -32,8 +32,9 @@ async fn main() -> std::io::Result<()> {
         .email_client
         .sender()
         .expect("Failed to parse the email sender's name");
+    let timeout = configuration.email_client.timeout();
     let authorization_token = configuration.email_client.authorization_token;
-    let email_client = EmailClient::new(url, sender_email, authorization_token);
+    let email_client = EmailClient::new(url, sender_email, authorization_token, timeout);
 
     let address = format!(
         "{}:{}",

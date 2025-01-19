@@ -48,8 +48,9 @@ async fn spawn_app() -> TestAPP {
         .as_str()
         .try_into()
         .unwrap();
+    let timeout = configuration.email_client.timeout();
     let authorization_token = configuration.email_client.authorization_token;
-    let email_client = EmailClient::new(url, sender_email, authorization_token);
+    let email_client = EmailClient::new(url, sender_email, authorization_token, timeout);
 
     let db_pool = configure_database(&configuration.database).await;
 
