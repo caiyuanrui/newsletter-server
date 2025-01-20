@@ -6,4 +6,8 @@ use crate::{email_client::EmailClient, utils::Data};
 pub struct AppState {
     pub db_pool: MySqlPool,
     pub email_client: Data<EmailClient>,
+    pub base_url: ApplicationBaseUrl,
 }
+
+#[derive(Debug, Clone)]
+pub struct ApplicationBaseUrl(pub String);

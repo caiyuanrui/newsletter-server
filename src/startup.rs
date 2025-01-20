@@ -17,6 +17,7 @@ use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use crate::{
     appstate::AppState,
     configuration::DatabaseSettings,
+    routes::confirm,
     utils::{Data, Server},
 };
 
@@ -33,7 +34,7 @@ pub struct Application {
 }
 
 impl Application {
-    pub async fn build(configuration: &Settings) -> Result<Self, std::io::Error> {
+    pub async fn build(configuration: Settings) -> Result<Self, std::io::Error> {
         // database
         let db_pool = get_connection_pool(&configuration.database);
         // tcp lst
@@ -58,7 +59,12 @@ impl Application {
         let authorization_token = configuration.email_client.authorization_token.clone();
         let email_client = EmailClient::new(url, sender_email, authorization_token, timeout);
 
-        let server = run(listener, db_pool.clone(), email_client);
+        let server = run(
+            listener,
+            db_pool.clone(),
+            email_client,
+            configuration.application.base_url,
+        );
 
         Ok(Self {
             server,
@@ -90,15 +96,19 @@ fn run(
     listener: tokio::net::TcpListener,
     db_pool: sqlx::MySqlPool,
     email_client: EmailClient,
+    base_url: String,
 ) -> Server {
+    let base_url = super::appstate::ApplicationBaseUrl(base_url);
     let shared_state = AppState {
         db_pool,
         email_client: Data::new(email_client),
+        base_url,
     };
 
     let app = Router::new()
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
+        .route("/subscriptions/confirm", get(confirm))
         .layer(middleware::from_fn(print_request_response))
         .with_state(shared_state);
 

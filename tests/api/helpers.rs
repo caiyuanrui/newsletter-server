@@ -27,6 +27,7 @@ pub struct TestAPP {
     pub address: String,
     pub db_pool: sqlx::MySqlPool,
     pub email_server: MockServer,
+    pub port: u16,
 }
 
 impl TestAPP {
@@ -58,9 +59,10 @@ pub async fn spawn_app() -> TestAPP {
 
     configure_database(&configuration.database).await;
 
-    let app = Application::build(&configuration)
+    let app = Application::build(configuration)
         .await
         .expect("Failed to build the test application");
+    let port = app.port();
     let address = format!("http://127.0.0.1:{}", app.port());
     let db_pool = app.db_pool();
 
@@ -70,6 +72,7 @@ pub async fn spawn_app() -> TestAPP {
         address,
         db_pool,
         email_server,
+        port,
     }
 }
 

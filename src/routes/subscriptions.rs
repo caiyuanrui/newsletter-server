@@ -6,7 +6,7 @@ use axum::{
 use serde_json::json;
 
 use crate::{
-    appstate::AppState,
+    appstate::{AppState, ApplicationBaseUrl},
     domain::{self, NewSubscriber},
     email_client::EmailClient,
 };
@@ -23,9 +23,6 @@ pub async fn subscribe(
     State(shared_state): State<AppState>,
     Form(form): Form<FormData>,
 ) -> impl IntoResponse {
-    let db_pool = &shared_state.db_pool;
-    let email_client = &shared_state.email_client;
-
     let new_subscriber = match form.try_into() {
         Ok(subscriber) => subscriber,
         Err(e) => {
@@ -34,12 +31,18 @@ pub async fn subscribe(
         }
     };
 
-    if let Err(e) = insert_subscriber(db_pool, &new_subscriber).await {
+    if let Err(e) = insert_subscriber(&shared_state.db_pool, &new_subscriber).await {
         tracing::error!("{e}");
         return http::StatusCode::INTERNAL_SERVER_ERROR;
     };
 
-    if let Err(e) = send_confirmation_email(email_client, &new_subscriber).await {
+    if let Err(e) = send_confirmation_email(
+        &shared_state.email_client,
+        &new_subscriber,
+        &shared_state.base_url,
+    )
+    .await
+    {
         tracing::error!("{e}");
         return http::StatusCode::INTERNAL_SERVER_ERROR;
     }
@@ -47,11 +50,16 @@ pub async fn subscribe(
     http::StatusCode::OK
 }
 
+#[tracing::instrument(
+    name = "Sending a confirmation email to the subscriber",
+    skip(email_client)
+)]
 pub async fn send_confirmation_email(
     email_client: &EmailClient,
     new_subscriber: &NewSubscriber,
+    base_url: &ApplicationBaseUrl,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let confirmation_link = "https://my-api.com/subscriptions/confirm";
+    let confirmation_link = format!("{}/subscriptions/confirm?token=mocktoken", base_url.0);
     let html_content = format!(
         r#"Welcome to our newsletter!<br />
     Click <a href="{confirmation_link}">here</a> to confirm your subscription."#,
@@ -82,7 +90,7 @@ pub async fn insert_subscriber(
     sqlx::query!(
         r#"
 INSERT INTO subscriptions (id, email, name, subscribed_at, status)
-VALUES (?, ?, ?, ?, 'confirmed')
+VALUES (?, ?, ?, ?, 'pending_confirmation')
 "#,
         uuid::Uuid::new_v4().to_string(),
         new_subscriber.email.as_ref(),
