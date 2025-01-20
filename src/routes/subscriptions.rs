@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     appstate::{AppState, ApplicationBaseUrl},
-    domain::{self, NewSubscriber},
+    domain::{self, NewSubscriber, SubscriberId},
     email_client::EmailClient,
 };
 
@@ -106,7 +106,7 @@ pub async fn send_confirmation_email(
 pub async fn insert_subscriber(
     pool: &MySqlPool,
     new_subscriber: &NewSubscriber,
-) -> Result<Uuid, sqlx::Error> {
+) -> Result<SubscriberId, sqlx::Error> {
     let subscriber_id = Uuid::new_v4();
 
     if let Err(e) = sqlx::query!(
@@ -114,7 +114,7 @@ pub async fn insert_subscriber(
 INSERT INTO subscriptions (id, email, name, subscribed_at, status)
 VALUES (?, ?, ?, ?, 'pending_confirmation')
 "#,
-        subscriber_id,
+        subscriber_id.to_string(),
         new_subscriber.email.as_ref(),
         new_subscriber.name.as_ref(),
         chrono::Utc::now()
@@ -125,7 +125,7 @@ VALUES (?, ?, ?, ?, 'pending_confirmation')
         tracing::error!("Failed to execute query: {:?}", e);
     }
 
-    Ok(subscriber_id)
+    Ok(subscriber_id.into())
 }
 
 #[instrument(
@@ -135,12 +135,12 @@ VALUES (?, ?, ?, ?, 'pending_confirmation')
 pub async fn store_token(
     pool: &MySqlPool,
     subscription_token: &str,
-    subscriber_id: Uuid,
+    subscriber_id: SubscriberId,
 ) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)  VALUES (?, ?)"#,
         subscription_token,
-        subscriber_id
+        subscriber_id.into_string()
     )
     .execute(pool)
     .await

@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use axum::{
     extract::{rejection::QueryRejection, Query, State},
     response::IntoResponse,
@@ -8,9 +6,8 @@ use hyper::StatusCode;
 use serde::Deserialize;
 use sqlx::MySqlPool;
 use tracing::instrument;
-use uuid::Uuid;
 
-use crate::appstate::AppState;
+use crate::{appstate::AppState, domain::SubscriberId};
 
 #[instrument(name = "Confirm a pending subscriber", skip(params, shared_state))]
 pub async fn confirm(
@@ -54,7 +51,7 @@ pub struct Params {
 async fn get_subscriber_id_with_token(
     token: &str,
     pool: &MySqlPool,
-) -> Result<Option<Uuid>, sqlx::Error> {
+) -> Result<Option<SubscriberId>, sqlx::Error> {
     let result = sqlx::query!(
         r#"SELECT subscriber_id FROM subscription_tokens WHERE subscription_token = ?"#,
         token,
@@ -67,17 +64,17 @@ async fn get_subscriber_id_with_token(
     })?;
 
     Ok(result.map(|r| {
-        Uuid::from_str(&r.subscriber_id).expect(
+        r.subscriber_id.as_str().try_into().expect(
             "Failed to parse the uuid fetched from the databse! Check the schema consistency please!",
         )
     }))
 }
 
 #[instrument(name = "Make the subscriber status as confirmed", skip(pool, id))]
-async fn confirm_subscriber(pool: &MySqlPool, id: Uuid) -> Result<(), sqlx::Error> {
+async fn confirm_subscriber(pool: &MySqlPool, id: SubscriberId) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"UPDATE subscriptions SET status = 'confirmed' WHERE id = ?"#,
-        id,
+        id.into_string(),
     )
     .execute(pool)
     .await
