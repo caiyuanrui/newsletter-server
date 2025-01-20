@@ -7,7 +7,6 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde_json::json;
 use sqlx::MySqlPool;
 use tracing::instrument;
-use uuid::Uuid;
 
 use crate::{
     appstate::{AppState, ApplicationBaseUrl},
@@ -30,7 +29,7 @@ pub async fn subscribe(
     let new_subscriber = match form.try_into() {
         Ok(subscriber) => subscriber,
         Err(e) => {
-            tracing::error!("{e}");
+            tracing::error!("Failed to parse form data: {e}");
             return http::StatusCode::BAD_REQUEST;
         }
     };
@@ -107,14 +106,14 @@ pub async fn insert_subscriber(
     pool: &MySqlPool,
     new_subscriber: &NewSubscriber,
 ) -> Result<SubscriberId, sqlx::Error> {
-    let subscriber_id = Uuid::new_v4();
+    let subscriber_id = SubscriberId::new_v4();
 
     if let Err(e) = sqlx::query!(
         r#"
 INSERT INTO subscriptions (id, email, name, subscribed_at, status)
 VALUES (?, ?, ?, ?, 'pending_confirmation')
 "#,
-        subscriber_id.to_string(),
+        subscriber_id.as_str(),
         new_subscriber.email.as_ref(),
         new_subscriber.name.as_ref(),
         chrono::Utc::now()
@@ -125,7 +124,7 @@ VALUES (?, ?, ?, ?, 'pending_confirmation')
         tracing::error!("Failed to execute query: {:?}", e);
     }
 
-    Ok(subscriber_id.into())
+    Ok(subscriber_id)
 }
 
 #[instrument(
@@ -140,11 +139,12 @@ pub async fn store_token(
     sqlx::query!(
         r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)  VALUES (?, ?)"#,
         subscription_token,
-        subscriber_id.into_string()
+        subscriber_id.as_str()
     )
     .execute(pool)
     .await
     .map_err(|e| {
+        tracing::error!("subscriber_id: {}", subscriber_id.as_str());
         tracing::error!("Failed to execute query: {e}");
         e
     })?;

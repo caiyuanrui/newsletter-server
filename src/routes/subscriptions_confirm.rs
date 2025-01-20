@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use axum::{
     extract::{rejection::QueryRejection, Query, State},
     response::IntoResponse,
@@ -37,7 +39,7 @@ pub async fn confirm(
             StatusCode::OK
         }
         Err(e) => {
-            tracing::error!("{e}");
+            tracing::error!("Failed to parse query: {e}");
             StatusCode::BAD_REQUEST
         }
     }
@@ -64,9 +66,7 @@ async fn get_subscriber_id_with_token(
     })?;
 
     Ok(result.map(|r| {
-        r.subscriber_id.as_str().try_into().expect(
-            "Failed to parse the uuid fetched from the databse! Check the schema consistency please!",
-        )
+        SubscriberId::from_str(&r.subscriber_id).expect("Failed to parse subscriber_id into uuid")
     }))
 }
 
@@ -74,7 +74,7 @@ async fn get_subscriber_id_with_token(
 async fn confirm_subscriber(pool: &MySqlPool, id: SubscriberId) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"UPDATE subscriptions SET status = 'confirmed' WHERE id = ?"#,
-        id.into_string(),
+        id.as_str(),
     )
     .execute(pool)
     .await
