@@ -64,20 +64,21 @@ impl EmailClient {
     /// This function will timeout if 10 seconds has elasped.
     pub async fn send_email(
         &self,
-        recipient: SubscriberEmail,
+        recipient: &SubscriberEmail,
         subject: &str,
         html_content: &str,
         text_content: &str,
     ) -> Result<reqwest::Response, reqwest::Error> {
         let url = self.base_url.join("email").unwrap();
         let request_body = SendEmailRequest {
-            from: Cow::Borrowed(self.sender.as_ref()),
-            to: Cow::Borrowed(recipient.as_ref()),
-            subject: Cow::Borrowed(subject),
-            text_body: Cow::Borrowed(text_content),
-            html_body: Cow::Borrowed(html_content),
+            from: self.sender.as_ref(),
+            to: recipient.as_ref(),
+            subject,
+            text_body: text_content,
+            html_body: html_content,
             message_stream: None,
         };
+
         self.http_client
             .post(url)
             .header(
@@ -94,12 +95,12 @@ impl EmailClient {
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct SendEmailRequest<'a> {
-    from: Cow<'a, str>,
-    to: Cow<'a, str>,
-    subject: Cow<'a, str>,
-    text_body: Cow<'a, str>,
-    html_body: Cow<'a, str>,
-    message_stream: Option<Cow<'a, str>>,
+    from: &'a str,
+    to: &'a str,
+    subject: &'a str,
+    text_body: &'a str,
+    html_body: &'a str,
+    message_stream: Option<&'a str>,
 }
 
 #[cfg(test)]
@@ -176,7 +177,7 @@ mod tests {
 
         let content = content();
         let _ = email_client
-            .send_email(email(), &subject(), &content, &content)
+            .send_email(&email(), &subject(), &content, &content)
             .await;
 
         // Assert
@@ -196,7 +197,7 @@ mod tests {
 
         let content = content();
         let outcome = email_client
-            .send_email(email(), &subject(), &content, &content)
+            .send_email(&email(), &subject(), &content, &content)
             .await;
 
         // Assert
@@ -217,7 +218,7 @@ mod tests {
 
         let content = content();
         let outcome = email_client
-            .send_email(email(), &subject(), &content, &content)
+            .send_email(&email(), &subject(), &content, &content)
             .await;
 
         // Assert
@@ -239,7 +240,7 @@ mod tests {
         let content = content();
 
         let outcome = email_client
-            .send_email(email(), &subject(), &content, &content)
+            .send_email(&email(), &subject(), &content, &content)
             .await;
 
         // Assert

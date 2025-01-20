@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use wiremock::MockServer;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
     startup::Application,
@@ -25,6 +26,7 @@ static TRACING: LazyLock<()> = LazyLock::new(|| {
 pub struct TestAPP {
     pub address: String,
     pub db_pool: sqlx::MySqlPool,
+    pub email_server: MockServer,
 }
 
 impl TestAPP {
@@ -44,10 +46,13 @@ impl TestAPP {
 pub async fn spawn_app() -> TestAPP {
     LazyLock::force(&TRACING);
 
+    let email_server = MockServer::start().await;
+
     let configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
         c.database.database_name = uuid::Uuid::new_v4().to_string().replace("-", "");
         c.application.port = 0;
+        c.email_client.base_url = email_server.uri();
         c
     };
 
@@ -61,7 +66,11 @@ pub async fn spawn_app() -> TestAPP {
 
     tokio::spawn(app.run());
 
-    TestAPP { address, db_pool }
+    TestAPP {
+        address,
+        db_pool,
+        email_server,
+    }
 }
 
 async fn configure_database(config: &DatabaseSettings) {

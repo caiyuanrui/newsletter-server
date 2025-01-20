@@ -6,26 +6,69 @@ use axum::{
 use serde_json::json;
 
 use crate::{
+    appstate::AppState,
     domain::{self, NewSubscriber},
-    utils::Data,
+    email_client::EmailClient,
 };
 
-#[tracing::instrument(name = "Adding a new subscriber", skip(form, pool),fields(
+#[axum_macros::debug_handler]
+#[tracing::instrument(
+  name = "Adding a new subscriber",
+  skip(form, shared_state),
+  fields(
   subscriber_email = %form.email,
   subscriber_name = %form.name
 ))]
 pub async fn subscribe(
-    State(pool): State<Data<sqlx::MySqlPool>>,
+    State(shared_state): State<AppState>,
     Form(form): Form<FormData>,
 ) -> impl IntoResponse {
+    let db_pool = &shared_state.db_pool;
+    let email_client = &shared_state.email_client;
+
     let new_subscriber = match form.try_into() {
         Ok(subscriber) => subscriber,
-        Err(_) => return http::StatusCode::BAD_REQUEST,
+        Err(e) => {
+            tracing::error!("{e}");
+            return http::StatusCode::BAD_REQUEST;
+        }
     };
-    match insert_subscriber(&pool, &new_subscriber).await {
-        Ok(_) => http::StatusCode::OK,
-        Err(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
+
+    if let Err(e) = insert_subscriber(db_pool, &new_subscriber).await {
+        tracing::error!("{e}");
+        return http::StatusCode::INTERNAL_SERVER_ERROR;
+    };
+
+    if let Err(e) = send_confirmation_email(email_client, &new_subscriber).await {
+        tracing::error!("{e}");
+        return http::StatusCode::INTERNAL_SERVER_ERROR;
     }
+
+    http::StatusCode::OK
+}
+
+pub async fn send_confirmation_email(
+    email_client: &EmailClient,
+    new_subscriber: &NewSubscriber,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let confirmation_link = "https://my-api.com/subscriptions/confirm";
+    let html_content = format!(
+        r#"Welcome to our newsletter!<br />
+    Click <a href="{confirmation_link}">here</a> to confirm your subscription."#,
+    );
+    let text_content = format!(
+        r#"Welcome to our newsletter!
+    Visit {confirmation_link} to confirm your subscription."#,
+    );
+
+    email_client
+        .send_email(
+            &new_subscriber.email,
+            "Welcome",
+            &html_content,
+            &text_content,
+        )
+        .await
 }
 
 #[tracing::instrument(

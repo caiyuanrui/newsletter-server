@@ -14,13 +14,16 @@ use http_body_util::BodyExt;
 
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 
-use crate::configuration::DatabaseSettings;
+use crate::{
+    appstate::AppState,
+    configuration::DatabaseSettings,
+    utils::{Data, Server},
+};
 
 use super::{
     configuration::Settings,
     email_client::EmailClient,
     routes::{health_check, subscribe},
-    utils::{Data, Server},
 };
 
 pub struct Application {
@@ -83,13 +86,21 @@ fn get_connection_pool(config: &DatabaseSettings) -> MySqlPool {
         .connect_lazy_with(config.with_db())
 }
 
-fn run(listener: tokio::net::TcpListener, db_pool: sqlx::MySqlPool, client: EmailClient) -> Server {
+fn run(
+    listener: tokio::net::TcpListener,
+    db_pool: sqlx::MySqlPool,
+    email_client: EmailClient,
+) -> Server {
+    let shared_state = AppState {
+        db_pool,
+        email_client: Data::new(email_client),
+    };
+
     let app = Router::new()
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
         .layer(middleware::from_fn(print_request_response))
-        .with_state(Data::new(db_pool))
-        .with_state(Data::new(client));
+        .with_state(shared_state);
 
     Server::new(axum::serve(listener, app).into_future())
 }
