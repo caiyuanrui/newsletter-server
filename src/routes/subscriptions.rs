@@ -3,7 +3,11 @@ use axum::{
     http,
     response::IntoResponse,
 };
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde_json::json;
+use sqlx::MySqlPool;
+use tracing::instrument;
+use uuid::Uuid;
 
 use crate::{
     appstate::{AppState, ApplicationBaseUrl},
@@ -31,15 +35,26 @@ pub async fn subscribe(
         }
     };
 
-    if let Err(e) = insert_subscriber(&shared_state.db_pool, &new_subscriber).await {
-        tracing::error!("{e}");
-        return http::StatusCode::INTERNAL_SERVER_ERROR;
+    let subscriber_id = match insert_subscriber(&shared_state.db_pool, &new_subscriber).await {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!("Failed to insert the subscriber's info into the database: {e}");
+            return http::StatusCode::INTERNAL_SERVER_ERROR;
+        }
     };
+
+    let subscription_token = generate_subscription_token();
+
+    if let Err(e) = store_token(&shared_state.db_pool, &subscription_token, subscriber_id).await {
+        tracing::error!("Failed to store the token: {e}");
+        return http::StatusCode::INTERNAL_SERVER_ERROR;
+    }
 
     if let Err(e) = send_confirmation_email(
         &shared_state.email_client,
         &new_subscriber,
         &shared_state.base_url,
+        &subscription_token,
     )
     .await
     {
@@ -58,8 +73,13 @@ pub async fn send_confirmation_email(
     email_client: &EmailClient,
     new_subscriber: &NewSubscriber,
     base_url: &ApplicationBaseUrl,
+    token: &str,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let confirmation_link = format!("{}/subscriptions/confirm?token=mocktoken", base_url.0);
+    let confirmation_link = format!(
+        "{}/subscriptions/confirm?token={}",
+        base_url.as_str(),
+        token
+    );
     let html_content = format!(
         r#"Welcome to our newsletter!<br />
     Click <a href="{confirmation_link}">here</a> to confirm your subscription."#,
@@ -84,25 +104,60 @@ pub async fn send_confirmation_email(
     skip(pool, new_subscriber)
 )]
 pub async fn insert_subscriber(
-    pool: &sqlx::MySqlPool,
+    pool: &MySqlPool,
     new_subscriber: &NewSubscriber,
-) -> Result<sqlx::mysql::MySqlQueryResult, sqlx::Error> {
-    sqlx::query!(
+) -> Result<Uuid, sqlx::Error> {
+    let subscriber_id = Uuid::new_v4();
+
+    if let Err(e) = sqlx::query!(
         r#"
 INSERT INTO subscriptions (id, email, name, subscribed_at, status)
 VALUES (?, ?, ?, ?, 'pending_confirmation')
 "#,
-        uuid::Uuid::new_v4().to_string(),
+        subscriber_id,
         new_subscriber.email.as_ref(),
         new_subscriber.name.as_ref(),
         chrono::Utc::now()
     )
     .execute(pool)
     .await
-    .map_err(|e| {
+    {
         tracing::error!("Failed to execute query: {:?}", e);
+    }
+
+    Ok(subscriber_id)
+}
+
+#[instrument(
+    name = "Store subscription token in the database",
+    skip(pool, subscription_token)
+)]
+pub async fn store_token(
+    pool: &MySqlPool,
+    subscription_token: &str,
+    subscriber_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)  VALUES (?, ?)"#,
+        subscription_token,
+        subscriber_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to execute query: {e}");
         e
-    })
+    })?;
+
+    Ok(())
+}
+
+fn generate_subscription_token() -> String {
+    let mut rng = thread_rng();
+    std::iter::repeat_with(|| rng.sample(Alphanumeric))
+        .map(char::from)
+        .take(25)
+        .collect()
 }
 
 #[derive(Debug, serde::Deserialize)]
