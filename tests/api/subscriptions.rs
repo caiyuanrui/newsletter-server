@@ -155,7 +155,8 @@ async fn subscribe_sends_a_confirmation_email_with_a_link() {
 async fn subscribe_fails_if_there_is_a_fatal_database_error() {
     let test_app = spawn_app().await;
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
-    sqlx::query!("ALTER TABLE subscription_tokens DROP COLUMN subscription_token")
+    // sqlx::query!("ALTER TABLE subscription_tokens DROP COLUMN subscription_token")
+    sqlx::query!("ALTER TABLE subscriptions DROP COLUMN email;")
         .execute(&test_app.db_pool)
         .await
         .expect("Failed to drop subscription_token field");
