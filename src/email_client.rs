@@ -98,11 +98,8 @@ impl EmailClient {
             .headers(headers)
             .json(&request_body)
             .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to send the request: {e}");
-                e
-            })
+            .await?
+            .error_for_status()
     }
 }
 

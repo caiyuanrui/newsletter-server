@@ -1,8 +1,9 @@
 use axum::{
     extract::{rejection::FormRejection, FromRequest, State},
     http,
-    response::{IntoResponse, Response},
+    response::IntoResponse,
 };
+use hyper::StatusCode;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde_json::json;
 use sqlx::{MySql, Transaction};
@@ -25,55 +26,72 @@ use crate::{
 pub async fn subscribe(
     State(shared_state): State<AppState>,
     Form(form): Form<FormData>,
-) -> Response {
-    let new_subscriber = match form.try_into() {
-        Ok(subscriber) => subscriber,
-        Err(e) => {
-            tracing::error!("Failed to parse form data: {e:?}");
-            return http::StatusCode::BAD_REQUEST.into_response();
-        }
-    };
-
-    let mut transaction = match shared_state.db_pool.begin().await {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("Failed to start a transaction: {e:?}");
-            return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    let subscriber_id = match insert_subscriber(&mut transaction, &new_subscriber).await {
-        Ok(id) => id,
-        Err(e) => {
-            tracing::error!("Failed to insert the subscriber's info into the database: {e:?}");
-            return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
+) -> Result<StatusCode, SubscribeError> {
+    let new_subscriber = form.try_into()?;
+    let mut transaction = shared_state.db_pool.begin().await?;
+    let subscriber_id = insert_subscriber(&mut transaction, &new_subscriber).await?;
     let subscription_token = generate_subscription_token();
-    if let Err(e) = store_token(&mut transaction, &subscription_token, subscriber_id).await {
-        tracing::error!("Failed to store the token: {e:?}");
-        return e.into_response();
-    }
-
-    if let Err(e) = send_confirmation_email(
+    store_token(&mut transaction, &subscription_token, subscriber_id).await?;
+    send_confirmation_email(
         &shared_state.email_client,
         &new_subscriber,
         &shared_state.base_url,
         &subscription_token,
     )
-    .await
-    {
-        tracing::error!("Failed to send confirmation email: {e:?}");
-        return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
+    .await?;
+    transaction.commit().await?;
+    Ok(http::StatusCode::OK)
+}
 
-    if let Err(e) = transaction.commit().await {
-        tracing::error!("Failed to commit the transaction: {e:?}");
-        return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
+#[derive(Debug)]
+pub enum SubscribeError {
+    ValidationError(String),
+    DatabaseError(sqlx::Error),
+    StoreTokenError(StoreTokenError),
+    SendEmailError(reqwest::Error),
+}
 
-    http::StatusCode::OK.into_response()
+impl std::fmt::Display for SubscribeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to create a new subscriber")
+    }
+}
+
+impl IntoResponse for SubscribeError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::ValidationError(_) => StatusCode::BAD_REQUEST.into_response(),
+            Self::DatabaseError(_) | Self::SendEmailError(_) | Self::StoreTokenError(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        }
+    }
+}
+
+impl std::error::Error for SubscribeError {}
+
+impl From<reqwest::Error> for SubscribeError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::SendEmailError(e)
+    }
+}
+
+impl From<StoreTokenError> for SubscribeError {
+    fn from(e: StoreTokenError) -> Self {
+        Self::StoreTokenError(e)
+    }
+}
+
+impl From<sqlx::Error> for SubscribeError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::DatabaseError(e)
+    }
+}
+
+impl From<String> for SubscribeError {
+    fn from(e: String) -> Self {
+        Self::ValidationError(e)
+    }
 }
 
 #[tracing::instrument(
@@ -236,12 +254,6 @@ impl std::fmt::Debug for StoreTokenError {
 impl std::error::Error for StoreTokenError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.0)
-    }
-}
-
-impl IntoResponse for StoreTokenError {
-    fn into_response(self) -> axum::response::Response {
-        http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
 }
 
