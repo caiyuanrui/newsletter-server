@@ -7,5 +7,5 @@ require_ssl = true
 host = "host.docker.internal"
 
 [email_client]
-base_url = "https://api.postmarkerapp.com"
+base_url = "https://api.postmarkapp.com"
 sender_email = "caiyuanrui@sjtu.edu.cn"

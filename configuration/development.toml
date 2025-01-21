@@ -7,5 +7,5 @@ require_ssl = false
 host = "localhost"
 
 [email_client]
-base_url = "https://api.postmarkerapp.com"
+base_url = "https://api.postmarkapp.com"
 sender_email = "caiyuanrui@sjtu.edu.cn"

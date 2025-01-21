@@ -5,6 +5,7 @@ use std::{
 
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
+use tracing::instrument;
 
 use super::domain::SubscriberEmail;
 
@@ -61,6 +62,7 @@ impl EmailClient {
     /// # Errors
     ///
     /// This function will timeout if 10 seconds has elasped.
+    #[instrument(name = "Send email with Postmark ", skip(self), fields(subscriber_email = %recipient))]
     pub async fn send_email(
         &self,
         recipient: &SubscriberEmail,
@@ -68,6 +70,8 @@ impl EmailClient {
         html_content: &str,
         text_content: &str,
     ) -> Result<reqwest::Response, reqwest::Error> {
+        use hyper::header::*;
+
         let url = self.base_url.join("email").unwrap();
         let request_body = SendEmailRequest {
             from: self.sender.as_ref(),
@@ -75,19 +79,30 @@ impl EmailClient {
             subject,
             text_body: text_content,
             html_body: html_content,
-            message_stream: None,
         };
+
+        let headers: HeaderMap = HeaderMap::from_iter(
+            [
+                (CONTENT_TYPE, "application/json".parse().unwrap()),
+                (ACCEPT, "application/json".parse().unwrap()),
+                (
+                    "X-Postmark-Server-Token".parse().unwrap(),
+                    self.authorization_token.expose_secret().parse().unwrap(),
+                ),
+            ]
+            .into_iter(),
+        );
 
         self.http_client
             .post(url)
-            .header(
-                "X-Postmark-Server-Token",
-                self.authorization_token.expose_secret(),
-            )
+            .headers(headers)
             .json(&request_body)
             .send()
-            .await?
-            .error_for_status()
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to send the request: {e}");
+                e
+            })
     }
 }
 
@@ -99,7 +114,6 @@ struct SendEmailRequest<'a> {
     subject: &'a str,
     text_body: &'a str,
     html_body: &'a str,
-    message_stream: Option<&'a str>,
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use axum::{
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde_json::json;
-use sqlx::MySqlPool;
+use sqlx::{MySql, Transaction};
 use tracing::instrument;
 
 use crate::{
@@ -34,7 +34,15 @@ pub async fn subscribe(
         }
     };
 
-    let subscriber_id = match insert_subscriber(&shared_state.db_pool, &new_subscriber).await {
+    let mut transaction = match shared_state.db_pool.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to start a transaction: {e}");
+            return http::StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    let subscriber_id = match insert_subscriber(&mut transaction, &new_subscriber).await {
         Ok(id) => id,
         Err(e) => {
             tracing::error!("Failed to insert the subscriber's info into the database: {e}");
@@ -43,8 +51,7 @@ pub async fn subscribe(
     };
 
     let subscription_token = generate_subscription_token();
-
-    if let Err(e) = store_token(&shared_state.db_pool, &subscription_token, subscriber_id).await {
+    if let Err(e) = store_token(&mut transaction, &subscription_token, subscriber_id).await {
         tracing::error!("Failed to store the token: {e}");
         return http::StatusCode::INTERNAL_SERVER_ERROR;
     }
@@ -57,7 +64,12 @@ pub async fn subscribe(
     )
     .await
     {
-        tracing::error!("{e}");
+        tracing::error!("Failed to send confirmation email: {e}");
+        return http::StatusCode::INTERNAL_SERVER_ERROR;
+    }
+
+    if let Err(e) = transaction.commit().await {
+        tracing::error!("Failed to commit the transaction: {e}");
         return http::StatusCode::INTERNAL_SERVER_ERROR;
     }
 
@@ -100,15 +112,15 @@ pub async fn send_confirmation_email(
 
 #[tracing::instrument(
     name = "Saving new subscriber details in the database",
-    skip(pool, new_subscriber)
+    skip(txn, new_subscriber)
 )]
 pub async fn insert_subscriber(
-    pool: &MySqlPool,
+    txn: &mut Transaction<'_, MySql>,
     new_subscriber: &NewSubscriber,
 ) -> Result<SubscriberId, sqlx::Error> {
     let subscriber_id = SubscriberId::new_v4();
 
-    if let Err(e) = sqlx::query!(
+    sqlx::query!(
         r#"
 INSERT INTO subscriptions (id, email, name, subscribed_at, status)
 VALUES (?, ?, ?, ?, 'pending_confirmation')
@@ -118,21 +130,18 @@ VALUES (?, ?, ?, ?, 'pending_confirmation')
         new_subscriber.name.as_ref(),
         chrono::Utc::now()
     )
-    .execute(pool)
-    .await
-    {
-        tracing::error!("Failed to execute query: {:?}", e);
-    }
+    .execute(txn.as_mut())
+    .await?;
 
     Ok(subscriber_id)
 }
 
 #[instrument(
     name = "Store subscription token in the database",
-    skip(pool, subscription_token)
+    skip(txn, subscription_token)
 )]
 pub async fn store_token(
-    pool: &MySqlPool,
+    txn: &mut Transaction<'_, MySql>,
     subscription_token: &str,
     subscriber_id: SubscriberId,
 ) -> Result<(), sqlx::Error> {
@@ -141,7 +150,7 @@ pub async fn store_token(
         subscription_token,
         subscriber_id.as_str()
     )
-    .execute(pool)
+    .execute(txn.as_mut())
     .await
     .map_err(|e| {
         tracing::error!("subscriber_id: {}", subscriber_id.as_str());
