@@ -9,22 +9,17 @@ use axum::{
     routing::{get, post},
     Router,
 };
-
 use http_body_util::BodyExt;
-
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 
-use crate::{
+use super::{
     appstate::AppState,
     configuration::DatabaseSettings,
-    routes::confirm,
-    utils::{Data, Server},
-};
-
-use super::{
     configuration::Settings,
     email_client::EmailClient,
+    routes::confirm,
     routes::{health_check, subscribe},
+    utils::{Data, Server},
 };
 
 pub struct Application {
