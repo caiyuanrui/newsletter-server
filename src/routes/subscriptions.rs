@@ -1,7 +1,7 @@
 use axum::{
     extract::{rejection::FormRejection, FromRequest, State},
     http,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde_json::json;
@@ -25,35 +25,35 @@ use crate::{
 pub async fn subscribe(
     State(shared_state): State<AppState>,
     Form(form): Form<FormData>,
-) -> impl IntoResponse {
+) -> Response {
     let new_subscriber = match form.try_into() {
         Ok(subscriber) => subscriber,
         Err(e) => {
-            tracing::error!("Failed to parse form data: {e}");
-            return http::StatusCode::BAD_REQUEST;
+            tracing::error!("Failed to parse form data: {e:?}");
+            return http::StatusCode::BAD_REQUEST.into_response();
         }
     };
 
     let mut transaction = match shared_state.db_pool.begin().await {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to start a transaction: {e}");
-            return http::StatusCode::INTERNAL_SERVER_ERROR;
+            tracing::error!("Failed to start a transaction: {e:?}");
+            return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
 
     let subscriber_id = match insert_subscriber(&mut transaction, &new_subscriber).await {
         Ok(id) => id,
         Err(e) => {
-            tracing::error!("Failed to insert the subscriber's info into the database: {e}");
-            return http::StatusCode::INTERNAL_SERVER_ERROR;
+            tracing::error!("Failed to insert the subscriber's info into the database: {e:?}");
+            return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
 
     let subscription_token = generate_subscription_token();
     if let Err(e) = store_token(&mut transaction, &subscription_token, subscriber_id).await {
-        tracing::error!("Failed to store the token: {e}");
-        return http::StatusCode::INTERNAL_SERVER_ERROR;
+        tracing::error!("Failed to store the token: {e:?}");
+        return e.into_response();
     }
 
     if let Err(e) = send_confirmation_email(
@@ -64,16 +64,16 @@ pub async fn subscribe(
     )
     .await
     {
-        tracing::error!("Failed to send confirmation email: {e}");
-        return http::StatusCode::INTERNAL_SERVER_ERROR;
+        tracing::error!("Failed to send confirmation email: {e:?}");
+        return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     if let Err(e) = transaction.commit().await {
-        tracing::error!("Failed to commit the transaction: {e}");
-        return http::StatusCode::INTERNAL_SERVER_ERROR;
+        tracing::error!("Failed to commit the transaction: {e:?}");
+        return http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    http::StatusCode::OK
+    http::StatusCode::OK.into_response()
 }
 
 #[tracing::instrument(
@@ -144,7 +144,7 @@ pub async fn store_token(
     txn: &mut Transaction<'_, MySql>,
     subscription_token: &str,
     subscriber_id: SubscriberId,
-) -> Result<(), sqlx::Error> {
+) -> Result<(), StoreTokenError> {
     sqlx::query!(
         r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)  VALUES (?, ?)"#,
         subscription_token,
@@ -152,11 +152,7 @@ pub async fn store_token(
     )
     .execute(txn.as_mut())
     .await
-    .map_err(|e| {
-        tracing::error!("subscriber_id: {}", subscriber_id.as_str());
-        tracing::error!("Failed to execute query: {e}");
-        e
-    })?;
+    .map_err(StoreTokenError)?;
 
     Ok(())
 }
@@ -218,4 +214,46 @@ impl IntoResponse for ApiError {
 
         (self.status, axum::Json(payload)).into_response()
     }
+}
+
+pub struct StoreTokenError(sqlx::Error);
+
+impl std::fmt::Display for StoreTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A databse error was encountered while trying to store a subscription token"
+        )
+    }
+}
+
+impl std::fmt::Debug for StoreTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl std::error::Error for StoreTokenError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+impl IntoResponse for StoreTokenError {
+    fn into_response(self) -> axum::response::Response {
+        http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    }
+}
+
+fn error_chain_fmt(
+    e: &impl std::error::Error,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    writeln!(f, "{}\n", e)?;
+    let mut current = e.source();
+    while let Some(source) = current {
+        writeln!(f, "Caused by:\n\t{}", source)?;
+        current = source.source();
+    }
+    Ok(())
 }
