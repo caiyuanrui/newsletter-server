@@ -18,7 +18,7 @@ use super::{
     configuration::Settings,
     email_client::EmailClient,
     routes::confirm,
-    routes::{health_check, subscribe},
+    routes::{health_check, publish_newsletter, subscribe},
     utils::{Data, Server},
 };
 
@@ -104,6 +104,7 @@ fn run(
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
         .route("/subscriptions/confirm", get(confirm))
+        .route("/newsletters", post(publish_newsletter))
         .layer(middleware::from_fn(print_request_response))
         .with_state(shared_state);
 

@@ -23,14 +23,20 @@ static TRACING: LazyLock<()> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-pub struct TestAPP {
+pub struct TestApp {
     pub address: String,
     pub db_pool: sqlx::MySqlPool,
     pub email_server: MockServer,
     pub port: u16,
 }
 
-impl TestAPP {
+pub struct ConfirmationLink {
+    pub html: reqwest::Url,
+    #[allow(dead_code)]
+    pub plain_text: reqwest::Url,
+}
+
+impl TestApp {
     pub async fn post_subscriptions(
         &self,
         body: impl Into<reqwest::Body>,
@@ -42,9 +48,34 @@ impl TestAPP {
             .send()
             .await
     }
+
+    pub async fn get_confirmation_links(
+        &self,
+        email_request: &wiremock::Request,
+    ) -> ConfirmationLink {
+        let body: serde_json::Value = serde_json::from_slice(&email_request.body).unwrap();
+
+        let get_link = |s: &str| {
+            let links: Vec<_> = linkify::LinkFinder::new()
+                .links(s)
+                .filter(|l| *l.kind() == linkify::LinkKind::Url)
+                .collect();
+            assert_eq!(1, links.len());
+            let raw_link = links[0].as_str().to_owned();
+            let mut confirmation_link = reqwest::Url::parse(&raw_link).unwrap();
+            assert_eq!("127.0.0.1", confirmation_link.host_str().unwrap());
+            confirmation_link.set_port(Some(self.port)).unwrap();
+            confirmation_link
+        };
+
+        let html = get_link(body["HtmlBody"].as_str().unwrap());
+        let plain_text = get_link(body["TextBody"].as_str().unwrap());
+
+        ConfirmationLink { html, plain_text }
+    }
 }
 
-pub async fn spawn_app() -> TestAPP {
+pub async fn spawn_app() -> TestApp {
     LazyLock::force(&TRACING);
 
     let email_server = MockServer::start().await;
@@ -68,7 +99,7 @@ pub async fn spawn_app() -> TestAPP {
 
     tokio::spawn(app.run());
 
-    TestAPP {
+    TestApp {
         address,
         db_pool,
         email_server,
