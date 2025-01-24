@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use serde::Serialize;
 use wiremock::MockServer;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
@@ -40,11 +41,22 @@ impl TestApp {
     pub async fn post_subscriptions(
         &self,
         body: impl Into<reqwest::Body>,
-    ) -> Result<reqwest::Response, reqwest::Error> {
+    ) -> reqwest::Result<reqwest::Response> {
         reqwest::Client::new()
             .post(format!("{}/subscriptions", &self.address))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body)
+            .send()
+            .await
+    }
+
+    pub async fn post_newsletters(
+        &self,
+        body: &serde_json::Value,
+    ) -> reqwest::Result<reqwest::Response> {
+        reqwest::Client::new()
+            .post(format!("{}/newsletters", self.address))
+            .json(body)
             .send()
             .await
     }
