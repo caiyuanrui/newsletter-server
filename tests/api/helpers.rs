@@ -1,6 +1,5 @@
 use std::sync::LazyLock;
 
-use serde::Serialize;
 use wiremock::MockServer;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
