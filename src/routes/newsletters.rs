@@ -1,10 +1,14 @@
 use anyhow::Context;
 use axum::{
+    body::Body,
     extract::{rejection::JsonRejection, State},
+    http::{HeaderMap, Response},
     response::IntoResponse,
     Json,
 };
+use base64::prelude::{Engine, BASE64_STANDARD};
 use hyper::StatusCode;
+use secrecy::SecretString;
 use serde::Deserialize;
 use sqlx::MySqlPool;
 use tracing::instrument;
@@ -13,6 +17,8 @@ use crate::{appstate::AppState, domain::SubscriberEmail, routes::error_chain_fmt
 
 #[derive(thiserror::Error)]
 pub enum PublishError {
+    #[error("Authentication failed")]
+    AuthError(#[source] anyhow::Error),
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
 }
@@ -24,8 +30,15 @@ impl std::fmt::Debug for PublishError {
 }
 
 impl IntoResponse for PublishError {
-    fn into_response(self) -> axum::response::Response {
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    fn into_response(self) -> Response<Body> {
+        match self {
+            Self::AuthError(_) => axum::http::Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("WWW-Authenticate", r#"Basic realm="publish""#)
+                .body(Body::empty())
+                .expect("Failed to build http response"),
+            Self::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
     }
 }
 
@@ -33,8 +46,11 @@ impl IntoResponse for PublishError {
 #[instrument(name = "Dummy implementation of newsletter", skip(shared_data, body))]
 pub async fn publish_newsletter(
     State(shared_data): State<AppState>,
+    headers: HeaderMap,
     body: Result<Json<BodyData>, JsonRejection>,
 ) -> Result<impl IntoResponse, PublishError> {
+    let _credential = basic_authentication(&headers).map_err(PublishError::AuthError)?;
+
     let body = match body {
         Ok(Json(body)) => body,
         Err(e) => {
@@ -71,6 +87,43 @@ pub async fn publish_newsletter(
     }
 
     Ok(StatusCode::OK)
+}
+
+/// Basic Authentication
+/// If the API rejects the request, a response must be replied with 401 Unauthorized and includes a special header: WWW-Authenticate, containing a challenge.
+struct Credential {
+    username: String,
+    password: SecretString,
+}
+
+/// Authorization: Basic <encoded credentials>,
+/// where <encoded credentials> is the base64-encoding of {username}:{password}
+fn basic_authentication(headers: &HeaderMap) -> Result<Credential, anyhow::Error> {
+    let header_value = headers
+        .get("Authorization")
+        .context("The Authorization header is missing")?
+        .to_str()
+        .context("The Authorization header is not a valid UTF8 string")?;
+    let base64encoded_segment = header_value
+        .strip_prefix("Basic ")
+        .context("The Authorization schema is not 'Base64'")?;
+    let decoded_bytes = BASE64_STANDARD
+        .decode(base64encoded_segment)
+        .context("Failed to base64-decode 'Basic' credentials")?;
+    let decoded_credentials =
+        String::from_utf8(decoded_bytes).context("The decoded credential is not a valid UTF8")?;
+
+    let mut credentials = decoded_credentials.splitn(2, ':');
+    let username = credentials
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("A username must be provided in 'Basic' auth"))?
+        .to_string();
+    let password = credentials
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("A password must be provided in 'Basic' auth"))?
+        .into();
+
+    Ok(Credential { username, password })
 }
 
 /// Get all confirmed subscribers. Filter out those subscribers with invalid email address.
