@@ -29,7 +29,7 @@ async fn the_link_returned_by_subscribe_returns_a_200_if_called() -> Result {
         .mount(&test_app.email_server)
         .await;
 
-    test_app.post_subscriptions(body).await?;
+    test_app.post_subscriptions(body).await;
 
     let email_request = &test_app.email_server.received_requests().await.unwrap()[0];
     let body: serde_json::Value = serde_json::from_slice(&email_request.body)?;

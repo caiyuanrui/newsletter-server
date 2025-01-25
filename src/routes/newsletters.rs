@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::Context;
 use axum::{
     body::Body,
@@ -8,12 +10,15 @@ use axum::{
 };
 use base64::prelude::{Engine, BASE64_STANDARD};
 use hyper::StatusCode;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
+use sha3::{Digest, Sha3_256};
 use sqlx::MySqlPool;
 use tracing::instrument;
 
-use crate::{appstate::AppState, domain::SubscriberEmail, routes::error_chain_fmt};
+use crate::{
+    appstate::AppState, domain::SubscriberEmail, domain::SubscriberId, routes::error_chain_fmt,
+};
 
 #[derive(thiserror::Error)]
 pub enum PublishError {
@@ -43,13 +48,20 @@ impl IntoResponse for PublishError {
 }
 
 /// Fetch all confirmed subscribers and send newsletters to them
-#[instrument(name = "Dummy implementation of newsletter", skip(shared_data, body))]
+#[instrument(
+    name = "Publish a newsletter issue",
+    skip(shared_data, body, headers),
+    fields(username = tracing::field::Empty, user_id = tracing::field::Empty)
+)]
 pub async fn publish_newsletter(
     State(shared_data): State<AppState>,
     headers: HeaderMap,
     body: Result<Json<BodyData>, JsonRejection>,
 ) -> Result<impl IntoResponse, PublishError> {
-    let _credential = basic_authentication(&headers).map_err(PublishError::AuthError)?;
+    let credentials = basic_authentication(&headers).map_err(PublishError::AuthError)?;
+    tracing::Span::current().record("username", tracing::field::display(&credentials.username));
+    let user_id = validate_credentials(&credentials, &shared_data.db_pool).await?;
+    tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
     let body = match body {
         Ok(Json(body)) => body,
@@ -91,14 +103,14 @@ pub async fn publish_newsletter(
 
 /// Basic Authentication
 /// If the API rejects the request, a response must be replied with 401 Unauthorized and includes a special header: WWW-Authenticate, containing a challenge.
-struct Credential {
+struct Credentials {
     username: String,
     password: SecretString,
 }
 
 /// Authorization: Basic <encoded credentials>,
 /// where <encoded credentials> is the base64-encoding of {username}:{password}
-fn basic_authentication(headers: &HeaderMap) -> Result<Credential, anyhow::Error> {
+fn basic_authentication(headers: &HeaderMap) -> Result<Credentials, anyhow::Error> {
     let header_value = headers
         .get("Authorization")
         .context("The Authorization header is missing")?
@@ -123,7 +135,7 @@ fn basic_authentication(headers: &HeaderMap) -> Result<Credential, anyhow::Error
         .ok_or_else(|| anyhow::anyhow!("A password must be provided in 'Basic' auth"))?
         .into();
 
-    Ok(Credential { username, password })
+    Ok(Credentials { username, password })
 }
 
 /// Get all confirmed subscribers. Filter out those subscribers with invalid email address.
@@ -152,6 +164,31 @@ async fn get_confirmed_subscribers(
     Ok(confirmed_subscribers)
 }
 
+async fn validate_credentials(
+    credentials: &Credentials,
+    pool: &MySqlPool,
+) -> Result<SubscriberId, PublishError> {
+    let mut hasher = Sha3_256::new();
+    hasher.update(credentials.password.expose_secret().as_bytes());
+    let password_hash = hasher.finalize();
+    let password_hash = format!("{:x}", password_hash);
+    sqlx::query!(
+        r#"SELECT user_id FROM users WHERE username = ? AND password_hash = ?"#,
+        credentials.username,
+        password_hash
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to perform a query to validate auth credentials")
+    .map_err(PublishError::UnexpectedError)?
+    .ok_or_else(|| PublishError::AuthError(anyhow::anyhow!("Invalid username or password")))
+    .and_then(|row| {
+        SubscriberId::from_str(&row.user_id)
+            .map_err(|e| PublishError::UnexpectedError(e.into()))
+            .inspect_err(|e| tracing::warn!("The user id is not a valid uuid: {}", e))
+    })
+}
+
 struct ConfirmedSubscriber {
     email: SubscriberEmail,
 }
@@ -166,4 +203,19 @@ pub struct BodyData {
 pub struct Content {
     html: String,
     text: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use sha3::{Digest, Sha3_256};
+
+    #[test]
+    fn print_sha_as_string() {
+        let mut hasher = Sha3_256::new();
+        let arbitrary_msg = "a random text";
+        hasher.update(arbitrary_msg);
+        let hash = hasher.finalize();
+        println!("hash value: {:x}", hash);
+        println!("length: {}", size_of_val(&hash));
+    }
 }

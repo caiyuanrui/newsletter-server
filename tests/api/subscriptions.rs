@@ -17,10 +17,7 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
         .mount(&test_app.email_server)
         .await;
 
-    let response = test_app
-        .post_subscriptions(body)
-        .await
-        .expect("Failed to execute request.");
+    let response = test_app.post_subscriptions(body).await;
 
     // Assert
     assert_eq!(200, response.status().as_u16());
@@ -62,10 +59,7 @@ async fn subscribe_returns_a_404_when_data_is_missing() {
 
     // Act
     for (body, message) in test_cases {
-        let response = test_app
-            .post_subscriptions(body)
-            .await
-            .expect("Failed to execute request.");
+        let response = test_app.post_subscriptions(body).await;
 
         // Assert
         assert_eq!(
@@ -89,10 +83,7 @@ async fn subscribe_returns_a_400_when_fields_are_present_but_invalid() {
 
     // Act
     for (body, message) in test_cases {
-        let response = test_app
-            .post_subscriptions(body)
-            .await
-            .expect("Failed to execute request.");
+        let response = test_app.post_subscriptions(body).await;
 
         // Assert
         assert_eq!(
@@ -161,7 +152,7 @@ async fn subscribe_fails_if_there_is_a_fatal_database_error() {
         .await
         .expect("Failed to drop subscription_token field");
 
-    let response = test_app.post_subscriptions(body).await.unwrap();
+    let response = test_app.post_subscriptions(body).await;
 
     assert_eq!(500, response.status().as_u16());
 }

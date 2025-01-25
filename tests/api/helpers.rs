@@ -1,9 +1,12 @@
 use std::sync::LazyLock;
 
+use fake::Fake;
+use sqlx::MySqlPool;
 use uuid::Uuid;
 use wiremock::MockServer;
 use zero2prod::{
     configuration::{get_configuration, DatabaseSettings},
+    domain::SubscriberId,
     startup::Application,
     telementry::{get_subscriber, init_subscriber},
 };
@@ -29,6 +32,14 @@ pub struct TestApp {
     pub db_pool: sqlx::MySqlPool,
     pub email_server: MockServer,
     pub port: u16,
+    pub test_user: TestUser,
+}
+
+#[derive(Debug)]
+pub struct TestUser {
+    pub user_id: SubscriberId,
+    pub username: String,
+    pub password: String,
 }
 
 pub struct ConfirmationLink {
@@ -38,28 +49,24 @@ pub struct ConfirmationLink {
 }
 
 impl TestApp {
-    pub async fn post_subscriptions(
-        &self,
-        body: impl Into<reqwest::Body>,
-    ) -> reqwest::Result<reqwest::Response> {
+    pub async fn post_subscriptions(&self, body: impl Into<reqwest::Body>) -> reqwest::Response {
         reqwest::Client::new()
             .post(format!("{}/subscriptions", &self.address))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body)
             .send()
             .await
+            .expect("Failed to execute request")
     }
 
-    pub async fn post_newsletters(
-        &self,
-        body: &serde_json::Value,
-    ) -> reqwest::Result<reqwest::Response> {
+    pub async fn post_newsletters(&self, body: &serde_json::Value) -> reqwest::Response {
         reqwest::Client::new()
             .post(format!("{}/newsletters", self.address))
-            .basic_auth(Uuid::new_v4().to_string(), Some(Uuid::new_v4().to_string()))
+            .basic_auth(&self.test_user.username, Some(&self.test_user.password))
             .json(body)
             .send()
             .await
+            .expect("Failed to execute request")
     }
 
     pub async fn get_confirmation_links(
@@ -88,6 +95,33 @@ impl TestApp {
     }
 }
 
+impl TestUser {
+    pub fn generate() -> Self {
+        Self {
+            user_id: SubscriberId::new_v4(),
+            username: fake::faker::name::en::Name().fake(),
+            password: Uuid::new_v4().into(),
+        }
+    }
+
+    async fn store(&self, pool: &MySqlPool) {
+        use sha3::Digest;
+        let mut hasher = sha3::Sha3_256::new();
+        hasher.update(self.password.as_bytes());
+        let password_hash = hasher.finalize();
+        let password_hash = format!("{:x}", password_hash);
+        sqlx::query!(
+            r#"INSERT INTO users (user_id, username, password_hash) VALUES (? ,?, ?)"#,
+            self.user_id.to_string(),
+            self.username,
+            password_hash
+        )
+        .execute(pool)
+        .await
+        .expect("Failed to store test user");
+    }
+}
+
 pub async fn spawn_app() -> TestApp {
     LazyLock::force(&TRACING);
 
@@ -112,11 +146,15 @@ pub async fn spawn_app() -> TestApp {
 
     tokio::spawn(app.run());
 
+    let test_user = TestUser::generate();
+    test_user.store(&db_pool).await;
+
     TestApp {
         address,
         db_pool,
         email_server,
         port,
+        test_user,
     }
 }
 

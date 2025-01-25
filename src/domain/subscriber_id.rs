@@ -26,3 +26,9 @@ impl FromStr for SubscriberId {
         Ok(Self(s.to_owned()))
     }
 }
+
+impl std::fmt::Display for SubscriberId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}

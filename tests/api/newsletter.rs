@@ -21,10 +21,7 @@ async fn newsletters_are_not_delivered_to_unconfirmed_subscribers() {
       }
     });
 
-    let response = test_app
-        .post_newsletters(&newsletter_request_body)
-        .await
-        .unwrap();
+    let response = test_app.post_newsletters(&newsletter_request_body).await;
 
     assert_eq!(200, response.status().as_u16());
 }
@@ -49,10 +46,7 @@ async fn newsletters_are_delivered_to_confirmed_subscribers() {
       }
     });
 
-    let response = test_app
-        .post_newsletters(&newsletter_request_body)
-        .await
-        .expect("Failed to execute request");
+    let response = test_app.post_newsletters(&newsletter_request_body).await;
 
     assert_eq!(200, response.status().as_u16())
 }
@@ -79,10 +73,7 @@ async fn newsletters_returns_400_for_invalid_data() {
     ];
 
     for (invalid_body, error_message) in test_cases {
-        let response = test_app
-            .post_newsletters(&invalid_body)
-            .await
-            .expect("Failed to execute request");
+        let response = test_app.post_newsletters(&invalid_body).await;
 
         assert_eq!(
             400,
@@ -126,7 +117,7 @@ async fn create_unconfirmed_subscriber(test_app: &TestApp) -> ConfirmationLink {
         .expect(1)
         .mount_as_scoped(&test_app.email_server)
         .await;
-    test_app.post_subscriptions(body).await.unwrap();
+    test_app.post_subscriptions(body).await;
 
     let email_request = test_app
         .email_server
