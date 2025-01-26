@@ -17,7 +17,10 @@ use sqlx::MySqlPool;
 use tracing::instrument;
 
 use crate::{
-    appstate::AppState, domain::SubscriberEmail, domain::SubscriberId, routes::error_chain_fmt,
+    appstate::AppState,
+    domain::{SubscriberEmail, SubscriberId},
+    routes::error_chain_fmt,
+    telementry::spawn_blocking_with_tracing,
 };
 
 #[derive(thiserror::Error)]
@@ -174,7 +177,7 @@ async fn validate_credentials(
         .map_err(PublishError::UnexpectedError)?
         .ok_or_else(|| PublishError::AuthError(anyhow::anyhow!("Unknow username")))?;
 
-    tokio::task::spawn_blocking(move || {
+    spawn_blocking_with_tracing(move || {
         verify_password_hash(expected_password_hash, credentials.password)
     })
     .await
@@ -186,6 +189,10 @@ async fn validate_credentials(
     Ok(user_id)
 }
 
+#[instrument(
+    name = "Verify password hash",
+    skip(expected_password_hash, password_candidate)
+)]
 fn verify_password_hash(
     expected_password_hash: SecretString,
     password_candidate: SecretString,

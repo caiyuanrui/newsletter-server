@@ -11,6 +11,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
+use tracing::Instrument;
 
 use super::{
     appstate::AppState,
@@ -115,11 +116,16 @@ async fn print_request_response(
     req: Request,
     next: Next,
 ) -> Result<impl IntoResponse, (http::StatusCode, String)> {
+    let uri = req.uri();
+    let method = req.method();
+
+    let span = tracing::info_span!("http request=", method = %method, uri = %uri);
+
     let (parts, body) = req.into_parts();
     let bytes = buffer_and_print("request", body).await?;
     let req = Request::from_parts(parts, Body::from(bytes));
 
-    let res = next.run(req).await;
+    let res = next.run(req).instrument(span).await;
 
     let (parts, body) = res.into_parts();
     let bytes = buffer_and_print("response", body).await?;
