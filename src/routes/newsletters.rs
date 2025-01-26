@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::Context;
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
     body::Body,
     extract::{rejection::JsonRejection, State},
@@ -12,7 +13,6 @@ use base64::prelude::{Engine, BASE64_STANDARD};
 use hyper::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use sha3::{Digest, Sha3_256};
 use sqlx::MySqlPool;
 use tracing::instrument;
 
@@ -168,25 +168,39 @@ async fn validate_credentials(
     credentials: &Credentials,
     pool: &MySqlPool,
 ) -> Result<SubscriberId, PublishError> {
-    let mut hasher = Sha3_256::new();
-    hasher.update(credentials.password.expose_secret().as_bytes());
-    let password_hash = hasher.finalize();
-    let password_hash = format!("{:x}", password_hash);
-    sqlx::query!(
-        r#"SELECT user_id FROM users WHERE username = ? AND password_hash = ?"#,
+    let row = sqlx::query!(
+        r#"SELECT user_id, password_hash FROM users WHERE username = ?"#,
         credentials.username,
-        password_hash
     )
     .fetch_optional(pool)
     .await
-    .context("Failed to perform a query to validate auth credentials")
-    .map_err(PublishError::UnexpectedError)?
-    .ok_or_else(|| PublishError::AuthError(anyhow::anyhow!("Invalid username or password")))
-    .and_then(|row| {
-        SubscriberId::from_str(&row.user_id)
-            .map_err(|e| PublishError::UnexpectedError(e.into()))
-            .inspect_err(|e| tracing::warn!("The user id is not a valid uuid: {}", e))
-    })
+    .context("Failed to perform a query to retrieve stored credentials")
+    .map_err(PublishError::UnexpectedError)?;
+
+    let (user_id, expected_password_hash) = match row {
+        Some(row) => (row.user_id, row.password_hash),
+        None => {
+            return Err(PublishError::AuthError(anyhow::anyhow!("Unknown username")));
+        }
+    };
+
+    let user_id = SubscriberId::from_str(&user_id)
+        .context("User id is not a valid uuid")
+        .map_err(PublishError::UnexpectedError)?;
+
+    let expected_password_hash = PasswordHash::new(&expected_password_hash)
+        .context("Failed parse hash in PHC string format")
+        .map_err(PublishError::UnexpectedError)?;
+
+    Argon2::default()
+        .verify_password(
+            credentials.password.expose_secret().as_bytes(),
+            &expected_password_hash,
+        )
+        .context("Invalid password")
+        .map_err(PublishError::AuthError)?;
+
+    Ok(user_id)
 }
 
 struct ConfirmedSubscriber {
@@ -203,19 +217,4 @@ pub struct BodyData {
 pub struct Content {
     html: String,
     text: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use sha3::{Digest, Sha3_256};
-
-    #[test]
-    fn print_sha_as_string() {
-        let mut hasher = Sha3_256::new();
-        let arbitrary_msg = "a random text";
-        hasher.update(arbitrary_msg);
-        let hash = hasher.finalize();
-        println!("hash value: {:x}", hash);
-        println!("length: {}", size_of_val(&hash));
-    }
 }

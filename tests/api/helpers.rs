@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use fake::Fake;
 use sqlx::MySqlPool;
 use uuid::Uuid;
@@ -105,11 +106,12 @@ impl TestUser {
     }
 
     async fn store(&self, pool: &MySqlPool) {
-        use sha3::Digest;
-        let mut hasher = sha3::Sha3_256::new();
-        hasher.update(self.password.as_bytes());
-        let password_hash = hasher.finalize();
-        let password_hash = format!("{:x}", password_hash);
+        let salt = SaltString::generate(&mut rand::thread_rng());
+        let password_hash = Argon2::default()
+            .hash_password(self.password.as_bytes(), &salt)
+            .unwrap()
+            .to_string();
+
         sqlx::query!(
             r#"INSERT INTO users (user_id, username, password_hash) VALUES (? ,?, ?)"#,
             self.user_id.to_string(),
