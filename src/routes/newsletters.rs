@@ -60,7 +60,7 @@ pub async fn publish_newsletter(
 ) -> Result<impl IntoResponse, PublishError> {
     let credentials = basic_authentication(&headers).map_err(PublishError::AuthError)?;
     tracing::Span::current().record("username", tracing::field::display(&credentials.username));
-    let user_id = validate_credentials(&credentials, &shared_data.db_pool).await?;
+    let user_id = validate_credentials(credentials, &shared_data.db_pool).await?;
     tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
     let body = match body {
@@ -164,43 +164,63 @@ async fn get_confirmed_subscribers(
     Ok(confirmed_subscribers)
 }
 
+#[instrument(name = "Validate credentials", skip(credentials, pool))]
 async fn validate_credentials(
-    credentials: &Credentials,
+    credentials: Credentials,
     pool: &MySqlPool,
 ) -> Result<SubscriberId, PublishError> {
-    let row = sqlx::query!(
+    let (user_id, expected_password_hash) = get_stored_credentials(&credentials, pool)
+        .await
+        .map_err(PublishError::UnexpectedError)?
+        .ok_or_else(|| PublishError::AuthError(anyhow::anyhow!("Unknow username")))?;
+
+    tokio::task::spawn_blocking(move || {
+        verify_password_hash(expected_password_hash, credentials.password)
+    })
+    .await
+    .context("Failed to spawn blocking task")
+    .map_err(PublishError::UnexpectedError)?
+    .context("Invalid password")
+    .map_err(PublishError::AuthError)?;
+
+    Ok(user_id)
+}
+
+fn verify_password_hash(
+    expected_password_hash: SecretString,
+    password_candidate: SecretString,
+) -> Result<(), PublishError> {
+    let expected_password_hash = PasswordHash::new(expected_password_hash.expose_secret())
+        .context("Failed to parse hash in PHC string format")
+        .map_err(PublishError::UnexpectedError)?;
+
+    Argon2::default()
+        .verify_password(
+            password_candidate.expose_secret().as_bytes(),
+            &expected_password_hash,
+        )
+        .context("Invalid password")
+        .map_err(PublishError::AuthError)
+}
+
+async fn get_stored_credentials(
+    credentials: &Credentials,
+    pool: &MySqlPool,
+) -> Result<Option<(SubscriberId, SecretString)>, anyhow::Error> {
+    sqlx::query!(
         r#"SELECT user_id, password_hash FROM users WHERE username = ?"#,
         credentials.username,
     )
     .fetch_optional(pool)
     .await
-    .context("Failed to perform a query to retrieve stored credentials")
-    .map_err(PublishError::UnexpectedError)?;
-
-    let (user_id, expected_password_hash) = match row {
-        Some(row) => (row.user_id, row.password_hash),
-        None => {
-            return Err(PublishError::AuthError(anyhow::anyhow!("Unknown username")));
-        }
-    };
-
-    let user_id = SubscriberId::from_str(&user_id)
-        .context("User id is not a valid uuid")
-        .map_err(PublishError::UnexpectedError)?;
-
-    let expected_password_hash = PasswordHash::new(&expected_password_hash)
-        .context("Failed parse hash in PHC string format")
-        .map_err(PublishError::UnexpectedError)?;
-
-    Argon2::default()
-        .verify_password(
-            credentials.password.expose_secret().as_bytes(),
-            &expected_password_hash,
-        )
-        .context("Invalid password")
-        .map_err(PublishError::AuthError)?;
-
-    Ok(user_id)
+    .context("Failed to perform a query to retrieve stored credentials")?
+    .map(|row| {
+        let subscriber_id =
+            SubscriberId::from_str(&row.user_id).context("Failed to parse user id")?;
+        let password_hash = SecretString::new(row.password_hash.into_boxed_str());
+        Ok((subscriber_id, password_hash))
+    })
+    .transpose()
 }
 
 struct ConfirmedSubscriber {
