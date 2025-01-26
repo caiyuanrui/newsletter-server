@@ -13,6 +13,8 @@ use http_body_util::BodyExt;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use tracing::Instrument;
 
+use crate::routes::home;
+
 use super::{
     appstate::AppState,
     configuration::DatabaseSettings,
@@ -106,6 +108,10 @@ fn run(
         .route("/subscriptions", post(subscribe))
         .route("/subscriptions/confirm", get(confirm))
         .route("/newsletters", post(publish_newsletter))
+        .route("/", get(home))
+        .nest_service("/static", tower_http::services::ServeDir::new("public"))
+        // .fallback(get(home))
+        // .fallback_service(tower_http::services::ServeDir::new("public"))
         .layer(middleware::from_fn(print_request_response))
         .with_state(shared_state);
 
