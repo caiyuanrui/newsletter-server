@@ -10,6 +10,10 @@ async fn main() -> std::io::Result<()> {
     init_subscriber(subscriber);
 
     let configuration = get_configuration().expect("Failed to read configuration.");
+    println!(
+        "Server is running on {}:{}",
+        &configuration.application.base_url, configuration.application.port
+    );
     let app = Application::build(configuration).await?;
 
     app.run().await
