@@ -18,6 +18,7 @@ axum-macros = "0.5.0"
 base64 = "0.22.1"
 chrono = "0.4.39"
 config = "0.15.6"
+htmlescape = "0.3.1"
 http-body-util = "0.1.2"
 hyper = { version = "1.5.2", features = ["full"] }
 linkify = "0.10.0"

@@ -8,7 +8,7 @@ use serde::Deserialize;
 pub async fn login_form(Query(query): Query<QueryParams>) -> impl IntoResponse {
     let error_html = query
         .error
-        .map(|c| format!("<p><i>{c}</i></p>"))
+        .map(|c| format!("<p><i>{}</i></p>", htmlescape::encode_minimal(&c)))
         .unwrap_or("".into());
     (
         StatusCode::OK,
