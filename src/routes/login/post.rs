@@ -1,7 +1,6 @@
 use axum::{extract::State, response::IntoResponse, Form};
-use hmac::{Hmac, Mac};
 use hyper::StatusCode;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::Deserialize;
 use tracing::instrument;
 
@@ -16,7 +15,7 @@ pub struct FormData {
     password: SecretString,
 }
 
-#[instrument(skip(form, shared_state), fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
+#[instrument(name = "Post Login Form", skip(form, shared_state), fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
 pub async fn login(
     State(shared_state): State<AppState>,
     Form(form): Form<FormData>,
@@ -34,21 +33,19 @@ pub async fn login(
             Ok((StatusCode::SEE_OTHER, [("Location", "/")]))
         }
         Err(e) => {
-            let error_message = e.to_string();
-            let error_message = urlencoding::encode(&error_message);
-            let secret: &[u8] = shared_state.hmac_secret.expose_secret().as_bytes();
-            let hmac_tag = {
-                let mut mac = Hmac::<sha3::Sha3_256>::new_from_slice(secret).unwrap();
-                mac.update(error_message.as_bytes());
-                mac.finalize().into_bytes()
-            };
+            // let error_message = e.to_string();
+            // let error_message = urlencoding::encode(&error_message);
+            // let secret: &[u8] = shared_state.hmac_secret.expose_secret().as_bytes();
+            // let hmac_tag = {
+            //     let mut mac = Hmac::<sha3::Sha3_256>::new_from_slice(secret).unwrap();
+            //     mac.update(error_message.as_bytes());
+            //     mac.finalize().into_bytes()
+            // };
 
             Err((
                 StatusCode::SEE_OTHER,
-                [(
-                    "Location",
-                    format!("/login?error={error_message}&tag={hmac_tag:x}"),
-                )],
+                [("Location", "/login")],
+                e.to_string(),
             ))
         }
     }

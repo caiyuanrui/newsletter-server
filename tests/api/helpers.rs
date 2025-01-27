@@ -1,7 +1,10 @@
 use std::sync::LazyLock;
 
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
+use axum::http::HeaderValue;
 use fake::Fake;
+use hyper::StatusCode;
+use serde::Serialize;
 use sqlx::MySqlPool;
 use uuid::Uuid;
 use wiremock::MockServer;
@@ -94,6 +97,18 @@ impl TestApp {
 
         ConfirmationLink { html, plain_text }
     }
+
+    pub async fn post_login(&self, body: &(impl Serialize + ?Sized)) -> reqwest::Response {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
+            .post(format!("{}/login", self.address))
+            .form(body)
+            .send()
+            .await
+            .expect("Failed to execute request")
+    }
 }
 
 impl TestUser {
@@ -180,4 +195,15 @@ async fn configure_database(config: &DatabaseSettings) {
         .run(&mut connection)
         .await
         .expect("Failed to migrate the databse.");
+}
+
+pub fn assert_is_redirect_to(response: reqwest::Response, location: &str) {
+    assert_eq!(StatusCode::SEE_OTHER, response.status());
+    assert_eq!(
+        location,
+        response
+            .headers()
+            .get("Location")
+            .expect("Location is missing in headers")
+    )
 }

@@ -8,9 +8,11 @@ use hyper::StatusCode;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 use sha3::Sha3_256;
+use tracing::instrument;
 
 use crate::appstate::{AppState, HmacSecret};
 
+#[instrument(name = "Get Login Form", skip(query, shared_state))]
 pub async fn login_form(
     Query(query): Query<QueryParams>,
     State(shared_state): State<AppState>,
@@ -64,6 +66,7 @@ pub async fn login_form(
     )
 }
 
+/// The `error` has been decoded by the `Query` extractor.
 #[derive(Debug, Deserialize)]
 pub struct QueryParams {
     pub error: Option<String>,
@@ -71,9 +74,14 @@ pub struct QueryParams {
 }
 
 impl QueryParams {
-    fn verify(mut self, secret: &HmacSecret) -> Result<String, anyhow::Error> {
-        let tag = hex::decode(self.tag.take().context("tag is missing")?)?;
-        let error = self.error.take().context("error message is missing")?;
+    #[instrument(
+        name = "Verify the Hmac tag in the query parameters",
+        skip(self, secret),
+        fields(error = self.error, tag = self.tag)
+    )]
+    fn verify(self, secret: &HmacSecret) -> Result<String, anyhow::Error> {
+        let tag = hex::decode(self.tag.context("tag is missing")?)?;
+        let error = self.error.context("error message is missing")?;
         let error_message = urlencoding::encode(error.as_str());
 
         let mut mac = Hmac::<Sha3_256>::new_from_slice(secret.expose_secret().as_bytes())?;
