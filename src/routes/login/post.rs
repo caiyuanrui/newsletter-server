@@ -55,14 +55,20 @@ impl std::fmt::Debug for LoginError {
 
 impl IntoResponse for LoginError {
     fn into_response(self) -> Response {
-        match self {
-            Self::AuthError(_) => (StatusCode::UNAUTHORIZED, self.to_string()).into_response(),
-            Self::UnexpectedError(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
-            }
-        }
+        // match self {
+        //     Self::AuthError(_) => (StatusCode::UNAUTHORIZED, self.to_string()).into_response(),
+        //     Self::UnexpectedError(_) => {
+        //         (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
+        //     }
+        // }
 
-        // (StatusCode::SEE_OTHER, [("Location", "/")]).into_response()
+        let encoded_error = urlencoding::Encoded(self.to_string());
+
+        (
+            StatusCode::SEE_OTHER,
+            [("Location", format!("/login?error={}", encoded_error))],
+        )
+            .into_response()
     }
 }
 
