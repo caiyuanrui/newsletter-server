@@ -1,31 +1,13 @@
-use anyhow::Context;
-use axum::{
-    extract::{Query, State},
-    response::{Html, IntoResponse},
-};
-use hmac::{Hmac, Mac};
+use axum::response::{Html, IntoResponse};
 use hyper::StatusCode;
-use secrecy::ExposeSecret;
-use serde::Deserialize;
-use sha3::Sha3_256;
+use tower_cookies::Cookies;
 use tracing::instrument;
 
-use crate::appstate::{AppState, HmacSecret};
-
-#[instrument(name = "Get Login Form", skip(query, shared_state))]
-pub async fn login_form(
-    Query(query): Query<QueryParams>,
-    State(shared_state): State<AppState>,
-) -> impl IntoResponse {
-    let error_html = match query.verify(&shared_state.hmac_secret) {
-        Ok(error_message) => format!(
-            "<p><i>{}</i></p>",
-            htmlescape::encode_minimal(error_message.as_str())
-        ),
-        Err(e) => {
-            tracing::warn!(error.message = %e, error.cause_chain = ?e, "Failed to verify query parameters using the HMAC tag");
-            "".into()
-        }
+#[instrument(name = "Get Login Form")]
+pub async fn login_form(cookies: Cookies) -> impl IntoResponse {
+    let error_html = match cookies.get("_flash") {
+        Some(cookie) => format!("<p><i>{}</i></p>", cookie.value()),
+        None => "".into(),
     };
 
     (
@@ -66,28 +48,28 @@ pub async fn login_form(
     )
 }
 
-/// The `error` has been decoded by the `Query` extractor.
-#[derive(Debug, Deserialize)]
-pub struct QueryParams {
-    pub error: Option<String>,
-    pub tag: Option<String>,
-}
+// /// The `error` has been decoded by the `Query` extractor.
+// #[derive(Debug, Deserialize)]
+// pub struct QueryParams {
+//     pub error: Option<String>,
+//     pub tag: Option<String>,
+// }
 
-impl QueryParams {
-    #[instrument(
-        name = "Verify the Hmac tag in the query parameters",
-        skip(self, secret),
-        fields(error = self.error, tag = self.tag)
-    )]
-    fn verify(self, secret: &HmacSecret) -> Result<String, anyhow::Error> {
-        let tag = hex::decode(self.tag.context("tag is missing")?)?;
-        let error = self.error.context("error message is missing")?;
-        let error_message = urlencoding::encode(error.as_str());
+// impl QueryParams {
+//     #[instrument(
+//         name = "Verify the Hmac tag in the query parameters",
+//         skip(self, secret),
+//         fields(error = self.error, tag = self.tag)
+//     )]
+//     fn verify(self, secret: &HmacSecret) -> Result<String, anyhow::Error> {
+//         let tag = hex::decode(self.tag.context("tag is missing")?)?;
+//         let error = self.error.context("error message is missing")?;
+//         let error_message = urlencoding::encode(error.as_str());
 
-        let mut mac = Hmac::<Sha3_256>::new_from_slice(secret.expose_secret().as_bytes())?;
-        mac.update(error_message.as_bytes());
-        mac.verify_slice(&tag)?;
+//         let mut mac = Hmac::<Sha3_256>::new_from_slice(secret.expose_secret().as_bytes())?;
+//         mac.update(error_message.as_bytes());
+//         mac.verify_slice(&tag)?;
 
-        Ok(error)
-    }
-}
+//         Ok(error)
+//     }
+// }
