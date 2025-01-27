@@ -13,7 +13,7 @@ use http_body_util::BodyExt;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use tracing::Instrument;
 
-use crate::routes::not_found;
+use crate::routes::{login, not_found};
 
 use super::{
     appstate::AppState,
@@ -109,6 +109,7 @@ fn run(
         .route("/newsletters", post(publish_newsletter))
         .route("/", get(home))
         .route("/login", get(login_form))
+        .route("/login", post(login))
         .fallback(not_found)
         .nest_service("/static", tower_http::services::ServeDir::new("public"))
         .layer(middleware::from_fn(print_request_response))
