@@ -1,17 +1,13 @@
-use axum::{
-    extract::State,
-    response::{IntoResponse, Response},
-    Form,
-};
+use axum::{extract::State, response::IntoResponse, Form};
+use hmac::{Hmac, Mac};
 use hyper::StatusCode;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use tracing::instrument;
 
 use crate::{
     appstate::AppState,
-    authentication::{validate_credentials, AuthError, Credentials},
-    routes::error_chain_fmt,
+    authentication::{validate_credentials, Credentials},
 };
 
 #[derive(Debug, Deserialize)]
@@ -24,7 +20,7 @@ pub struct FormData {
 pub async fn login(
     State(shared_state): State<AppState>,
     Form(form): Form<FormData>,
-) -> Result<impl IntoResponse, LoginError> {
+) -> impl IntoResponse {
     let credentials = Credentials {
         username: form.username,
         password: form.password,
@@ -32,51 +28,79 @@ pub async fn login(
 
     tracing::Span::current().record("username", tracing::field::display(&credentials.username));
 
-    let user_id = validate_credentials(credentials, &shared_state.db_pool).await?;
+    match validate_credentials(credentials, &shared_state.db_pool).await {
+        Ok(user_id) => {
+            tracing::Span::current().record("user_id", tracing::field::display(&user_id));
+            Ok((StatusCode::SEE_OTHER, [("Location", "/")]))
+        }
+        Err(e) => {
+            let error_message = e.to_string();
+            let error_message = urlencoding::encode(&error_message);
+            let secret: &[u8] = shared_state.hmac_secret.expose_secret().as_bytes();
+            let hmac_tag = {
+                let mut mac = Hmac::<sha3::Sha3_256>::new_from_slice(secret).unwrap();
+                mac.update(error_message.as_bytes());
+                mac.finalize().into_bytes()
+            };
 
-    tracing::Span::current().record("user_id", tracing::field::display(&user_id));
-
-    Ok((StatusCode::SEE_OTHER, [("Location", "/")]))
-}
-
-#[derive(thiserror::Error)]
-pub enum LoginError {
-    #[error("Authentication failed")]
-    AuthError(#[source] anyhow::Error),
-    #[error("Something went wrong")]
-    UnexpectedError(#[from] anyhow::Error),
-}
-
-impl std::fmt::Debug for LoginError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        error_chain_fmt(self, f)
-    }
-}
-
-impl IntoResponse for LoginError {
-    fn into_response(self) -> Response {
-        // match self {
-        //     Self::AuthError(_) => (StatusCode::UNAUTHORIZED, self.to_string()).into_response(),
-        //     Self::UnexpectedError(_) => {
-        //         (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
-        //     }
-        // }
-
-        let encoded_error = urlencoding::Encoded(self.to_string());
-
-        (
-            StatusCode::SEE_OTHER,
-            [("Location", format!("/login?error={}", encoded_error))],
-        )
-            .into_response()
-    }
-}
-
-impl From<AuthError> for LoginError {
-    fn from(value: AuthError) -> Self {
-        match value {
-            AuthError::InvalidCredentials(_) => Self::AuthError(value.into()),
-            AuthError::UnexpectedError(_) => Self::UnexpectedError(value.into()),
+            Err((
+                StatusCode::SEE_OTHER,
+                [(
+                    "Location",
+                    format!("/login?error={error_message}&tag={hmac_tag:x}"),
+                )],
+            ))
         }
     }
 }
+
+// #[derive(thiserror::Error)]
+// pub enum LoginError {
+//     #[error("Authentication failed")]
+//     AuthError(#[source] anyhow::Error),
+//     #[error("Something went wrong")]
+//     UnexpectedError(#[from] anyhow::Error),
+// }
+
+// impl std::fmt::Debug for LoginError {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         error_chain_fmt(self, f)
+//     }
+// }
+
+// impl IntoResponse for LoginError {
+//     fn into_response(self) -> Response {
+//         // match self {
+//         //     Self::AuthError(_) => (StatusCode::UNAUTHORIZED, self.to_string()).into_response(),
+//         //     Self::UnexpectedError(_) => {
+//         //         (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
+//         //     }
+//         // }
+
+//         let query_string = format!("error={}", urlencoding::encode(&self.to_string()));
+//         let secret: &[u8] = &[0; 32];
+//         let hmac_tag = {
+//             let mut mac = Hmac::<sha3::Sha3_256>::new_from_slice(secret).unwrap();
+//             mac.update(query_string.as_bytes());
+//             mac.finalize().into_bytes()
+//         };
+
+//         (
+//             StatusCode::SEE_OTHER,
+//             [(
+//                 "Location",
+//                 format!("/login?{query_string}&tag={hmac_tag:x}"),
+//             )],
+//         )
+//             .into_response()
+//     }
+// }
+
+// impl From<AuthError> for LoginError {
+//     fn from(value: AuthError) -> Self {
+//         match value {
+//             AuthError::InvalidCredentials(_) => Self::AuthError(value.into()),
+//             AuthError::UnexpectedError(_) => Self::UnexpectedError(value.into()),
+//         }
+//     }
+// }

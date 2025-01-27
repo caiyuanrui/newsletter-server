@@ -9,6 +9,7 @@ database_name = "newsletter"
 port = 8000
 host = "127.0.0.1"
 require_ssl = false
+hmac_secret = "super-long-and-secret-random-key-needed-to-verify-message-integrity"
 
 [email_client]
 base_url = "localhost"

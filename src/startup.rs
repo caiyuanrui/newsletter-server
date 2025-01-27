@@ -14,7 +14,10 @@ use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use tower_http::cors::CorsLayer;
 use tracing::Instrument;
 
-use crate::routes::{login, not_found};
+use crate::{
+    appstate::HmacSecret,
+    routes::{login, not_found},
+};
 
 use super::{
     appstate::AppState,
@@ -62,6 +65,7 @@ impl Application {
             db_pool.clone(),
             email_client,
             configuration.application.base_url,
+            configuration.application.hmac_secret,
         );
 
         Ok(Self {
@@ -95,12 +99,14 @@ fn run(
     db_pool: sqlx::MySqlPool,
     email_client: EmailClient,
     base_url: String,
+    hmac_secret: HmacSecret,
 ) -> Server {
     let base_url = super::appstate::ApplicationBaseUrl(base_url);
     let shared_state = AppState {
         db_pool,
         email_client: Data::new(email_client),
         base_url,
+        hmac_secret,
     };
 
     let app = Router::new()

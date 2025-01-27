@@ -4,7 +4,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde_aux::field_attributes::{deserialize_bool_from_anything, deserialize_number_from_string};
 use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
 
-use crate::domain::SubscriberEmail;
+use crate::{appstate::HmacSecret, domain::SubscriberEmail};
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Settings {
@@ -31,6 +31,7 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
     pub base_url: String,
+    pub hmac_secret: HmacSecret,
 }
 
 #[derive(Debug, serde::Deserialize)]
