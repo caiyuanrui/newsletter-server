@@ -11,7 +11,7 @@ use super::{domain::SubscriberId, telementry::spawn_blocking_with_tracing};
 
 #[derive(thiserror::Error, Debug)]
 pub enum AuthError {
-    #[error("Invalid credentials")]
+    #[error("Authentication failed")]
     InvalidCredentials(#[source] anyhow::Error),
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),

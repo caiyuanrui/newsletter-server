@@ -1,7 +1,6 @@
 use std::sync::LazyLock;
 
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
-use axum::http::HeaderValue;
 use fake::Fake;
 use hyper::StatusCode;
 use serde::Serialize;
@@ -197,7 +196,7 @@ async fn configure_database(config: &DatabaseSettings) {
         .expect("Failed to migrate the databse.");
 }
 
-pub fn assert_is_redirect_to(response: reqwest::Response, location: &str) {
+pub fn assert_is_redirect_to(response: &reqwest::Response, location: &str) {
     assert_eq!(StatusCode::SEE_OTHER, response.status());
     assert_eq!(
         location,

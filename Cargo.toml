@@ -66,7 +66,7 @@ features = [
 [dependencies.reqwest]
 version = "0.12.12"
 default-features = false
-features = ["json", "rustls-tls"]
+features = ["json", "rustls-tls", "cookies"]
 
 [profile.release]
 strip = true
