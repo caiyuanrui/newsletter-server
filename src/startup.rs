@@ -11,6 +11,7 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
+use tower_http::cors::CorsLayer;
 use tracing::Instrument;
 
 use crate::routes::{login, not_found};
@@ -112,6 +113,7 @@ fn run(
         .route("/login", post(login))
         .fallback(not_found)
         .nest_service("/static", tower_http::services::ServeDir::new("public"))
+        .layer(CorsLayer::permissive())
         .layer(middleware::from_fn(print_request_response))
         .with_state(shared_state);
 
