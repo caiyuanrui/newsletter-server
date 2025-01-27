@@ -1,5 +1,4 @@
 use axum::{
-    body::Body,
     extract::State,
     response::{IntoResponse, Response},
     Form,
@@ -37,10 +36,7 @@ pub async fn login(
 
     tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
-    Response::builder()
-        .header("Location", "/")
-        .body(Body::empty())
-        .map_err(|e| LoginError::UnexpectedError(e.into()))
+    Ok((StatusCode::SEE_OTHER, [("Location", "/")]))
 }
 
 #[derive(thiserror::Error)]
@@ -65,6 +61,8 @@ impl IntoResponse for LoginError {
                 (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
             }
         }
+
+        // (StatusCode::SEE_OTHER, [("Location", "/")]).into_response()
     }
 }
 

@@ -5,17 +5,23 @@
     <title>Login</title>
   </head>
   <body>
-    <form>
+    <form action="/login" method="post">
       <label
         >Username
         <input
           type="text"
           placeholder="Enter Username"
           name="username"
+          required
         /> </label
       ><label
         >Password
-        <input type="password" placeholder="Enter Password" name="password" />
+        <input
+          type="password"
+          placeholder="Enter Password"
+          name="password"
+          required
+        />
       </label>
       <button type="submit">Login</button>
     </form>
