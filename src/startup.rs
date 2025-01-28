@@ -118,7 +118,6 @@ fn run(
         .route("/login", get(login_form))
         .route("/login", post(login))
         .fallback(not_found)
-        // .nest_service("/static", tower_http::services::ServeDir::new("public"))
         .layer(tower_cookies::CookieManagerLayer::new())
         .layer(CorsLayer::permissive())
         .layer(middleware::from_fn(print_request_response))

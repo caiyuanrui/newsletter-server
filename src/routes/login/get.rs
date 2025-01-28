@@ -1,17 +1,35 @@
-use axum::response::{Html, IntoResponse};
-use hyper::StatusCode;
-use tower_cookies::Cookies;
+use axum::{
+    extract::State,
+    response::{Html, IntoResponse},
+};
+use hmac::{Hmac, Mac};
+use hyper::{header, StatusCode};
+use secrecy::ExposeSecret;
+use serde::{Deserialize, Serialize};
+use tower_cookies::{cookie::time::Duration, Cookie, Cookies};
 use tracing::instrument;
 
-#[instrument(name = "Get Login Form")]
-pub async fn login_form(cookies: Cookies) -> impl IntoResponse {
-    let error_html = match cookies.get("_flash") {
-        Some(cookie) => format!("<p><i>{}</i></p>", cookie.value()),
-        None => "".into(),
-    };
+use crate::appstate::{AppState, HmacSecret};
+
+#[instrument(name = "Get Login Form", skip(app_state))]
+pub async fn login_form(cookies: Cookies, State(app_state): State<AppState>) -> impl IntoResponse {
+    let error_html: String = cookies
+        .get("_flash")
+        .and_then(|cookie| serde_json::from_str::<SignedCookieValue>(cookie.value()).ok())
+        .filter(|value| value.validate(&app_state.hmac_secret))
+        .map(|value| format!("<p><i>{}</i></p>", value.message))
+        .unwrap_or_default();
+
+    let new_value = SignedCookieValue::new("".into(), &app_state.hmac_secret);
+    let cookie = Cookie::build(("_flash", new_value.into_json()))
+        .max_age(Duration::ZERO)
+        .http_only(true)
+        .secure(true)
+        .build();
 
     (
         StatusCode::OK,
+        [(header::SET_COOKIE, cookie.to_string())],
         Html::from(format!(
             r#"<!doctype html>
     <html lang="en">
@@ -48,28 +66,51 @@ pub async fn login_form(cookies: Cookies) -> impl IntoResponse {
     )
 }
 
-// /// The `error` has been decoded by the `Query` extractor.
-// #[derive(Debug, Deserialize)]
-// pub struct QueryParams {
-//     pub error: Option<String>,
-//     pub tag: Option<String>,
-// }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignedCookieValue {
+    pub message: String,
+    pub tag: String,
+}
 
-// impl QueryParams {
-//     #[instrument(
-//         name = "Verify the Hmac tag in the query parameters",
-//         skip(self, secret),
-//         fields(error = self.error, tag = self.tag)
-//     )]
-//     fn verify(self, secret: &HmacSecret) -> Result<String, anyhow::Error> {
-//         let tag = hex::decode(self.tag.context("tag is missing")?)?;
-//         let error = self.error.context("error message is missing")?;
-//         let error_message = urlencoding::encode(error.as_str());
+impl SignedCookieValue {
+    pub fn new(message: String, key: &HmacSecret) -> Self {
+        let mut mac =
+            Hmac::<sha3::Sha3_256>::new_from_slice(key.expose_secret().as_bytes()).unwrap();
+        mac.update(message.as_bytes());
+        let result = mac.finalize().into_bytes();
+        let tag = format!("{:x}", result);
+        Self { message, tag }
+    }
 
-//         let mut mac = Hmac::<Sha3_256>::new_from_slice(secret.expose_secret().as_bytes())?;
-//         mac.update(error_message.as_bytes());
-//         mac.verify_slice(&tag)?;
+    pub fn validate(&self, key: &HmacSecret) -> bool {
+        let mut mac =
+            Hmac::<sha3::Sha3_256>::new_from_slice(key.expose_secret().as_bytes()).unwrap();
+        mac.update(self.message.as_bytes());
+        let result = mac.finalize().into_bytes();
+        let tag = format!("{:x}", result);
+        tag == self.tag
+    }
 
-//         Ok(error)
-//     }
-// }
+    pub fn into_json(self) -> String {
+        serde_json::json!(self).to_string()
+    }
+
+    pub fn from_json(value: &str) -> serde_json::Result<Self> {
+        serde_json::de::from_str(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test() {
+        let cookie = Cookie::new("name", "value");
+        println!("{}", cookie);
+        let cookie = Cookie::build(("base_name", "base_value"))
+            .http_only(true)
+            .build();
+        println!("{}", cookie);
+    }
+}
