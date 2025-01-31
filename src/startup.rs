@@ -10,8 +10,15 @@ use axum::{
     Router,
 };
 use http_body_util::BodyExt;
+use secrecy::ExposeSecret;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
+use tower_cookies::{cookie::time, Key};
 use tower_http::cors::CorsLayer;
+use tower_sessions::{Expiry, SessionManagerLayer};
+use tower_sessions_redis_store::{
+    fred::prelude::{ClientLike, Config, Pool},
+    RedisStore,
+};
 use tracing::Instrument;
 
 use crate::{
@@ -28,14 +35,61 @@ use super::{
     utils::{Data, Server},
 };
 
+fn run(
+    listener: tokio::net::TcpListener,
+    db_pool: sqlx::MySqlPool,
+    redis_pool: Pool,
+    email_client: EmailClient,
+    base_url: String,
+    hmac_secret: HmacSecret,
+) -> Server {
+    let secret_key = Key::from(hmac_secret.expose_secret().as_bytes());
+
+    let base_url = super::appstate::ApplicationBaseUrl(base_url);
+    let shared_state = AppState {
+        db_pool,
+        email_client: Data::new(email_client),
+        base_url,
+        hmac_secret,
+    };
+
+    let redis_store = RedisStore::new(redis_pool);
+    let redis_layer = SessionManagerLayer::new(redis_store)
+        .with_secure(false)
+        .with_signed(secret_key)
+        .with_expiry(Expiry::OnInactivity(time::Duration::seconds(10)));
+
+    let app = Router::new()
+        .route("/health_check", get(health_check))
+        .route("/subscriptions", post(subscribe))
+        .route("/subscriptions/confirm", get(confirm))
+        .route("/newsletters", post(publish_newsletter))
+        .route("/", get(home))
+        .route("/login", get(login_form))
+        .route("/login", post(login))
+        .fallback(not_found)
+        .layer(tower_cookies::CookieManagerLayer::new())
+        .layer(CorsLayer::permissive())
+        .layer(redis_layer)
+        .layer(middleware::from_fn(print_request_response))
+        .with_state(shared_state);
+
+    Server::new(axum::serve(listener, app).into_future())
+}
+
 pub struct Application {
     port: u16,
+    redis_pool: Pool,
     db_pool: MySqlPool,
     server: Server,
 }
 
 impl Application {
-    pub async fn build(configuration: Settings) -> Result<Self, std::io::Error> {
+    pub async fn build(configuration: Settings) -> Result<Self, anyhow::Error> {
+        // redis
+        let redis_config = Config::from_url(configuration.redis_uri.expose_secret())?;
+        let redis_pool = Pool::new(redis_config, None, None, None, 6)?;
+
         // database
         let db_pool = get_connection_pool(&configuration.database);
         // tcp lst
@@ -63,6 +117,7 @@ impl Application {
         let server = run(
             listener,
             db_pool.clone(),
+            redis_pool.clone(),
             email_client,
             configuration.application.base_url,
             configuration.application.hmac_secret,
@@ -72,11 +127,16 @@ impl Application {
             server,
             port,
             db_pool,
+            redis_pool,
         })
     }
 
-    pub async fn run(self) -> std::io::Result<()> {
-        self.server.await
+    pub async fn run(self) -> Result<(), anyhow::Error> {
+        let conn = self.redis_pool.connect();
+        self.redis_pool.wait_for_connect().await?;
+        self.server.await?;
+        conn.await??;
+        Ok(())
     }
 
     pub fn port(&self) -> u16 {
@@ -92,38 +152,6 @@ fn get_connection_pool(config: &DatabaseSettings) -> MySqlPool {
     MySqlPoolOptions::new()
         .acquire_timeout(Duration::from_secs(2))
         .connect_lazy_with(config.with_db())
-}
-
-fn run(
-    listener: tokio::net::TcpListener,
-    db_pool: sqlx::MySqlPool,
-    email_client: EmailClient,
-    base_url: String,
-    hmac_secret: HmacSecret,
-) -> Server {
-    let base_url = super::appstate::ApplicationBaseUrl(base_url);
-    let shared_state = AppState {
-        db_pool,
-        email_client: Data::new(email_client),
-        base_url,
-        hmac_secret,
-    };
-
-    let app = Router::new()
-        .route("/health_check", get(health_check))
-        .route("/subscriptions", post(subscribe))
-        .route("/subscriptions/confirm", get(confirm))
-        .route("/newsletters", post(publish_newsletter))
-        .route("/", get(home))
-        .route("/login", get(login_form))
-        .route("/login", post(login))
-        .fallback(not_found)
-        .layer(tower_cookies::CookieManagerLayer::new())
-        .layer(CorsLayer::permissive())
-        .layer(middleware::from_fn(print_request_response))
-        .with_state(shared_state);
-
-    Server::new(axum::serve(listener, app).into_future())
 }
 
 async fn print_request_response(

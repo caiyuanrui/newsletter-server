@@ -1,3 +1,5 @@
+redis_uri = "redis://127.0.0.1:6379"
+
 [database]
 username = "zero2prod"
 password = "12345678"
