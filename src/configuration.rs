@@ -6,14 +6,14 @@ use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
 
 use crate::{appstate::HmacSecret, domain::SubscriberEmail};
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
     pub email_client: EmailClientSettings,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct DatabaseSettings {
     pub username: String,
     pub password: secrecy::SecretString,
@@ -25,7 +25,7 @@ pub struct DatabaseSettings {
     pub require_ssl: bool,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct ApplicationSettings {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
@@ -34,7 +34,7 @@ pub struct ApplicationSettings {
     pub hmac_secret: HmacSecret,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct EmailClientSettings {
     pub base_url: String,
     sender_email: String,

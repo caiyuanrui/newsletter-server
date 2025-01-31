@@ -49,7 +49,7 @@ async fn newsletters_are_delivered_to_confirmed_subscribers() {
 
     let response = test_app.post_newsletters(&newsletter_request_body).await;
 
-    assert_eq!(200, response.status().as_u16())
+    assert_eq!(200, response.status().as_u16());
 }
 
 #[tokio::test]
