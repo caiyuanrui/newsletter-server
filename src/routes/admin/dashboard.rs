@@ -7,24 +7,22 @@ use axum::{
 };
 use hyper::StatusCode;
 use sqlx::MySqlPool;
-use tower_sessions::Session;
 use tracing::instrument;
 
-use crate::{appstate::AppState, domain::SubscriberId};
+use crate::{appstate::AppState, domain::SubscriberId, session_state::TypedSession};
 
 #[instrument(name = "Admin Dashboard", skip(session, app_state))]
 pub async fn admin_dashboard(
-    session: Session,
+    session: TypedSession,
     State(app_state): State<AppState>,
 ) -> Result<Response, Response> {
-    let username =
-        if let Some(user_id) = session.get::<SubscriberId>("user_id").await.map_err(e500)? {
-            get_username(user_id, &app_state.db_pool)
-                .await
-                .map_err(e500)?
-        } else {
-            todo!()
-        };
+    let username = if let Some(user_id) = session.get_user_id().await.map_err(e500)? {
+        get_username(user_id, &app_state.db_pool)
+            .await
+            .map_err(e500)?
+    } else {
+        todo!()
+    };
 
     Ok(Html(format!(
         r#"<!DOCTYPE html>

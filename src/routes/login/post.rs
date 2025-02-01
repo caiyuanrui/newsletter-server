@@ -9,12 +9,12 @@ use hyper::StatusCode;
 use secrecy::SecretString;
 use serde::Deserialize;
 use tower_cookies::Cookie;
-use tower_sessions::Session;
 use tracing::instrument;
 
 use crate::{
     appstate::{AppState, HmacSecret},
     authentication::{validate_credentials, AuthError, Credentials},
+    session_state::TypedSession,
 };
 
 use super::get::SignedCookieValue;
@@ -25,10 +25,10 @@ pub struct FormData {
     password: SecretString,
 }
 
-#[instrument(name = "Post Login Form", skip(form, app_state), fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
+#[instrument(name = "Post Login Form", skip(form, app_state, session), fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
 pub async fn login(
     State(app_state): State<AppState>,
-    session: Session,
+    session: TypedSession,
     Form(form): Form<FormData>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     let credentials = Credentials {
@@ -38,25 +38,27 @@ pub async fn login(
 
     tracing::Span::current().record("username", tracing::field::display(&credentials.username));
 
-    session.cycle_id().await.unwrap();
     match validate_credentials(credentials, &app_state.db_pool).await {
         Ok(user_id) => {
             tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
-            session.insert("user_id", user_id).await.map_err(|e| {
-                login_redirect(
-                    LoginError::UnexpectedError(e.into()),
-                    &app_state.hmac_secret,
-                )
-            })?;
+            session
+                .renew()
+                .await
+                .map_err(|e| login_redirect(anyhow::Error::from(e), &app_state.hmac_secret))?;
+            session
+                .insert_user_id(user_id)
+                .await
+                .map_err(|e| login_redirect(anyhow::Error::from(e), &app_state.hmac_secret))?;
 
             Ok((StatusCode::SEE_OTHER, [("Location", "/admin/dashboard")]))
         }
-        Err(e) => Err(login_redirect(e.into(), &app_state.hmac_secret)),
+        Err(e) => Err(login_redirect(e, &app_state.hmac_secret)),
     }
 }
 
-fn login_redirect(e: LoginError, secret: &HmacSecret) -> impl IntoResponse {
+fn login_redirect(e: impl Into<LoginError>, secret: &HmacSecret) -> Response {
+    let e = e.into();
     let cookie_value = SignedCookieValue::new(format!("{e}"), secret);
     let cookie = Cookie::build(("_flash", cookie_value.into_json()))
         .http_only(true)
