@@ -1,24 +1,22 @@
 use hyper::StatusCode;
+use sqlx::MySqlPool;
 use wiremock::{matchers, Mock, ResponseTemplate};
 
 use super::helpers::*;
 
 type Result = std::result::Result<(), Box<dyn std::error::Error>>;
 
-#[tokio::test]
-async fn confirmations_without_token_are_rejected_with_a_400() -> Result {
-    let test_app = spawn_app().await;
-
+#[sqlx::test]
+async fn confirmations_without_token_are_rejected_with_a_400(pool: MySqlPool) -> Result {
+    let test_app = spawn_test_app(pool).await;
     let response = reqwest::get(&format!("{}/subscriptions/confirm", test_app.address)).await?;
-
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
     Ok(())
 }
 
-#[tokio::test]
-async fn the_link_returned_by_subscribe_returns_a_200_if_called() -> Result {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn the_link_returned_by_subscribe_returns_a_200_if_called(pool: MySqlPool) -> Result {
+    let test_app = spawn_test_app(pool).await;
 
     // Mock a user with pending status in the databse.
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";

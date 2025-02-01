@@ -1,11 +1,12 @@
+use sqlx::MySqlPool;
 use wiremock::{matchers, Mock, ResponseTemplate};
 
 use super::helpers::*;
 
-#[tokio::test]
-async fn subscribe_returns_a_200_for_valid_form_data() {
+#[sqlx::test]
+async fn subscribe_returns_a_200_for_valid_form_data(pool: MySqlPool) {
     // Arrange
-    let test_app = spawn_app().await;
+    let test_app = spawn_test_app(pool).await;
 
     // Act
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
@@ -23,9 +24,9 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
     assert_eq!(200, response.status().as_u16());
 }
 
-#[tokio::test]
-async fn subscribe_persists_the_new_subscriber() {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn subscribe_persists_the_new_subscriber(pool: MySqlPool) {
+    let test_app = spawn_test_app(pool).await;
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
 
     Mock::given(matchers::path("/email"))
@@ -47,10 +48,10 @@ async fn subscribe_persists_the_new_subscriber() {
     assert_eq!(saved.status, "pending_confirmation")
 }
 
-#[tokio::test]
-async fn subscribe_returns_a_404_when_data_is_missing() {
+#[sqlx::test]
+async fn subscribe_returns_a_404_when_data_is_missing(pool: MySqlPool) {
     // Arrange
-    let test_app = spawn_app().await;
+    let test_app = spawn_test_app(pool).await;
     let test_cases = vec![
         ("name=le%20guin", "missing the email"),
         ("email=ursula_le_guin%40gmail.com", "missing the name"),
@@ -71,10 +72,10 @@ async fn subscribe_returns_a_404_when_data_is_missing() {
     }
 }
 
-#[tokio::test]
-async fn subscribe_returns_a_400_when_fields_are_present_but_invalid() {
+#[sqlx::test]
+async fn subscribe_returns_a_400_when_fields_are_present_but_invalid(pool: MySqlPool) {
     // Arrange
-    let test_app = spawn_app().await;
+    let test_app = spawn_test_app(pool).await;
     let test_cases = vec![
         ("name=&email=ursula_le_guin%40gmail.com", "empty name"),
         ("name=le%20guin&email=", "empty email"),
@@ -95,9 +96,9 @@ async fn subscribe_returns_a_400_when_fields_are_present_but_invalid() {
     }
 }
 
-#[tokio::test]
-async fn subscribe_sends_a_confirmation_email_for_valid_data() {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn subscribe_sends_a_confirmation_email_for_valid_data(pool: MySqlPool) {
+    let test_app = spawn_test_app(pool).await;
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
 
     Mock::given(matchers::path("/email"))
@@ -110,9 +111,9 @@ async fn subscribe_sends_a_confirmation_email_for_valid_data() {
     let _ = test_app.post_subscriptions(body).await;
 }
 
-#[tokio::test]
-async fn subscribe_sends_a_confirmation_email_with_a_link() {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn subscribe_sends_a_confirmation_email_with_a_link(pool: MySqlPool) {
+    let test_app = spawn_test_app(pool).await;
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
 
     Mock::given(matchers::path("/email"))
@@ -142,9 +143,9 @@ async fn subscribe_sends_a_confirmation_email_with_a_link() {
     assert_eq!(html_link, text_link);
 }
 
-#[tokio::test]
-async fn subscribe_fails_if_there_is_a_fatal_database_error() {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn subscribe_fails_if_there_is_a_fatal_database_error(pool: MySqlPool) {
+    let test_app = spawn_test_app(pool).await;
     let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
     // sqlx::query!("ALTER TABLE subscription_tokens DROP COLUMN subscription_token")
     sqlx::query!("ALTER TABLE subscriptions DROP COLUMN email;")

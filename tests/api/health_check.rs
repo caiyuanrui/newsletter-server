@@ -1,9 +1,11 @@
+use sqlx::MySqlPool;
+
 use super::helpers::*;
 
-#[tokio::test]
-async fn health_check_works() {
+#[sqlx::test]
+async fn health_check_works(pool: MySqlPool) {
     // Arrage
-    let test_app = spawn_app().await;
+    let test_app = spawn_test_app(pool).await;
     let client = reqwest::Client::new();
 
     // Act

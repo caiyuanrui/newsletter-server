@@ -1,5 +1,6 @@
 use std::{future::IntoFuture, time::Duration};
 
+use anyhow::Context;
 use axum::{
     body::{Body, Bytes},
     extract::Request,
@@ -23,7 +24,7 @@ use tracing::Instrument;
 
 use crate::{
     appstate::HmacSecret,
-    routes::{login, not_found},
+    routes::{admin_dashboard, login, not_found},
 };
 
 use super::{
@@ -67,6 +68,7 @@ fn run(
         .route("/", get(home))
         .route("/login", get(login_form))
         .route("/login", post(login))
+        .route("/admin/dashboard", get(admin_dashboard))
         .fallback(not_found)
         .layer(tower_cookies::CookieManagerLayer::new())
         .layer(CorsLayer::permissive())
@@ -98,6 +100,59 @@ impl Application {
             configuration.application.host, configuration.application.port
         );
         let listener = tokio::net::TcpListener::bind(&addr).await?;
+        let port = listener.local_addr().unwrap().port();
+        // email client
+        let url = configuration
+            .email_client
+            .base_url
+            .as_str()
+            .try_into()
+            .expect("Failed to parse the url");
+        let sender_email = configuration
+            .email_client
+            .sender()
+            .expect("Failed to parse the email sender's name");
+        let timeout = configuration.email_client.timeout();
+        let authorization_token = configuration.email_client.authorization_token.clone();
+        let email_client = EmailClient::new(url, sender_email, authorization_token, timeout);
+
+        let server = run(
+            listener,
+            db_pool.clone(),
+            redis_pool.clone(),
+            email_client,
+            configuration.application.base_url,
+            configuration.application.hmac_secret,
+        );
+
+        Ok(Self {
+            server,
+            port,
+            db_pool,
+            redis_pool,
+        })
+    }
+
+    /// This is used for test.
+    pub async fn build_with_db(
+        configuration: Settings,
+        pool: MySqlPool,
+    ) -> Result<Self, anyhow::Error> {
+        // redis
+        let redis_config = Config::from_url(configuration.redis_uri.expose_secret())?;
+        let redis_pool = Pool::new(redis_config, None, None, None, 6)
+            .context("Failed to create the redis pool")?;
+
+        // database
+        let db_pool = pool;
+        // tcp lst
+        let addr = format!(
+            "{}:{}",
+            configuration.application.host, configuration.application.port
+        );
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
+            .with_context(|| format!("Failed to bind tcp listener: {} is already in use", addr))?;
         let port = listener.local_addr().unwrap().port();
         // email client
         let url = configuration

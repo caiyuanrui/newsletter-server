@@ -1,11 +1,12 @@
+use sqlx::MySqlPool;
 use uuid::Uuid;
 use wiremock::{matchers, Mock, ResponseTemplate};
 
-use crate::helpers::{spawn_app, ConfirmationLink, TestApp};
+use crate::helpers::{spawn_test_app, ConfirmationLink, TestApp};
 
-#[tokio::test]
-async fn newsletters_are_not_delivered_to_unconfirmed_subscribers() {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn newsletters_are_not_delivered_to_unconfirmed_subscribers(pool: MySqlPool) {
+    let test_app = spawn_test_app(pool).await;
     create_unconfirmed_subscriber(&test_app).await;
 
     Mock::given(matchers::any())
@@ -27,9 +28,9 @@ async fn newsletters_are_not_delivered_to_unconfirmed_subscribers() {
     assert_eq!(200, response.status().as_u16());
 }
 
-#[tokio::test]
-async fn newsletters_are_delivered_to_confirmed_subscribers() {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn newsletters_are_delivered_to_confirmed_subscribers(pool: MySqlPool) {
+    let test_app = spawn_test_app(pool).await;
     create_confirmed_subscriber(&test_app).await;
 
     Mock::given(matchers::path("/email"))
@@ -52,9 +53,9 @@ async fn newsletters_are_delivered_to_confirmed_subscribers() {
     assert_eq!(200, response.status().as_u16());
 }
 
-#[tokio::test]
-async fn newsletters_returns_400_for_invalid_data() {
-    let test_app = spawn_app().await;
+#[sqlx::test]
+async fn newsletters_returns_400_for_invalid_data(pool: MySqlPool) {
+    let test_app = spawn_test_app(pool).await;
     let test_cases = [
         (
             serde_json::json!({
@@ -85,9 +86,9 @@ async fn newsletters_returns_400_for_invalid_data() {
     }
 }
 
-#[tokio::test]
-async fn requests_missing_authorization_are_rejected() {
-    let app = spawn_app().await;
+#[sqlx::test]
+async fn requests_missing_authorization_are_rejected(pool: MySqlPool) {
+    let app = spawn_test_app(pool).await;
 
     let response = reqwest::Client::new()
         .post(format!("{}/newsletters", app.address))
@@ -109,9 +110,9 @@ async fn requests_missing_authorization_are_rejected() {
     )
 }
 
-#[tokio::test]
-async fn non_existing_user_is_rejected() {
-    let app = spawn_app().await;
+#[sqlx::test]
+async fn non_existing_user_is_rejected(pool: MySqlPool) {
+    let app = spawn_test_app(pool).await;
 
     let username = Uuid::new_v4().to_string();
     let password = Uuid::new_v4().to_string();
@@ -137,9 +138,9 @@ async fn non_existing_user_is_rejected() {
     );
 }
 
-#[tokio::test]
-async fn invalid_password_is_rejected() {
-    let app = spawn_app().await;
+#[sqlx::test]
+async fn invalid_password_is_rejected(pool: MySqlPool) {
+    let app = spawn_test_app(pool).await;
 
     let invalid_password = Uuid::new_v4().to_string();
 

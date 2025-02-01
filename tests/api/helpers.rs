@@ -8,7 +8,7 @@ use sqlx::MySqlPool;
 use uuid::Uuid;
 use wiremock::MockServer;
 use zero2prod::{
-    configuration::{get_configuration, DatabaseSettings},
+    configuration::get_configuration,
     domain::SubscriberId,
     startup::Application,
     telementry::{get_subscriber, init_subscriber},
@@ -118,6 +118,17 @@ impl TestApp {
             .await
             .unwrap()
     }
+
+    pub async fn get_admin_dashboard(&self) -> String {
+        self.api_client
+            .get(format!("{}/admin/dashboard", self.address))
+            .send()
+            .await
+            .expect("Failed to execute request")
+            .text()
+            .await
+            .unwrap()
+    }
 }
 
 impl TestUser {
@@ -148,22 +159,24 @@ impl TestUser {
     }
 }
 
-pub async fn spawn_app() -> TestApp {
+pub async fn spawn_test_app(pool: MySqlPool) -> TestApp {
     LazyLock::force(&TRACING);
 
     let email_server = MockServer::start().await;
 
     let configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
-        c.database.database_name = uuid::Uuid::new_v4().to_string().replace("-", "");
+        c.database.database_name = pool
+            .connect_options()
+            .get_database()
+            .expect("Failed to get the current database name")
+            .to_owned();
         c.application.port = 0;
         c.email_client.base_url = email_server.uri();
         c
     };
 
-    configure_database(&configuration.database).await;
-
-    let app = Application::build(configuration)
+    let app = Application::build_with_db(configuration, pool)
         .await
         .expect("Failed to build the test application");
     let port = app.port();
@@ -189,28 +202,6 @@ pub async fn spawn_app() -> TestApp {
         test_user,
         api_client,
     }
-}
-
-async fn configure_database(config: &DatabaseSettings) {
-    use sqlx::{Connection, Executor};
-
-    // create database
-    let mut connection = sqlx::MySqlConnection::connect_with(&config.without_db())
-        .await
-        .expect("Failed to connect to MySQL.");
-    connection
-        .execute(format!(r#"CREATE DATABASE `{}`;"#, config.database_name).as_str())
-        .await
-        .unwrap_or_else(|_| panic!("Failed to create test database {}", config.database_name));
-
-    // migrate databse
-    let mut connection = sqlx::MySqlConnection::connect_with(&config.with_db())
-        .await
-        .expect("Failed to connect to MySQL.");
-    sqlx::migrate!("./migrations")
-        .run(&mut connection)
-        .await
-        .expect("Failed to migrate the databse.");
 }
 
 pub fn assert_is_redirect_to(response: &reqwest::Response, location: &str) {
