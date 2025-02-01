@@ -9,27 +9,23 @@ use serde::Deserialize;
 use sqlx::MySqlPool;
 use tracing::instrument;
 
-use crate::{appstate::AppState, domain::SubscriberId};
+use crate::domain::SubscriberId;
 
-#[instrument(name = "Confirm a pending subscriber", skip(params, shared_state))]
+#[instrument(name = "Confirm a pending subscriber", skip(params, db_pool))]
 pub async fn confirm(
     params: Result<Query<Params>, QueryRejection>,
-    shared_state: State<AppState>,
+    State(db_pool): State<MySqlPool>,
 ) -> impl IntoResponse {
     match params {
         Ok(Query(params)) => {
-            let subscriber_id =
-                match get_subscriber_id_with_token(&params.token, &shared_state.db_pool).await {
-                    Ok(id) => id,
-                    Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-                };
+            let subscriber_id = match get_subscriber_id_with_token(&params.token, &db_pool).await {
+                Ok(id) => id,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+            };
 
             match subscriber_id {
                 Some(subscriber_id) => {
-                    if confirm_subscriber(&shared_state.db_pool, subscriber_id)
-                        .await
-                        .is_err()
-                    {
+                    if confirm_subscriber(&db_pool, subscriber_id).await.is_err() {
                         return StatusCode::INTERNAL_SERVER_ERROR;
                     }
                 }

@@ -7,30 +7,31 @@ use axum::{
 use hyper::StatusCode;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde_json::json;
-use sqlx::{MySql, Transaction};
+use sqlx::{MySql, MySqlPool, Transaction};
 use tracing::instrument;
 
 use crate::{
-    appstate::{AppState, ApplicationBaseUrl},
+    appstate::ApplicationBaseUrl,
     domain::{self, NewSubscriber, SubscriberId},
     email_client::EmailClient,
+    utils::Data,
 };
 
-#[axum_macros::debug_handler]
 #[tracing::instrument(
   name = "Adding a new subscriber",
-  skip(form, shared_state),
+  skip(form,  db_pool, email_client),
   fields(
   subscriber_email = %form.email,
   subscriber_name = %form.name
 ))]
 pub async fn subscribe(
-    State(shared_state): State<AppState>,
+    State(db_pool): State<MySqlPool>,
+    State(email_client): State<Data<EmailClient>>,
+    State(base_url): State<ApplicationBaseUrl>,
     Form(form): Form<FormData>,
 ) -> Result<StatusCode, SubscribeError> {
     let new_subscriber = form.try_into().map_err(SubscribeError::ValidationError)?;
-    let mut transaction = shared_state
-        .db_pool
+    let mut transaction = db_pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
@@ -46,9 +47,9 @@ pub async fn subscribe(
         .await
         .context("Failed to commit SQL transaction to store a new subscriber.")?;
     send_confirmation_email(
-        &shared_state.email_client,
+        &email_client,
         &new_subscriber,
-        &shared_state.base_url,
+        &base_url,
         &subscription_token,
     )
     .await

@@ -13,10 +13,11 @@ use sqlx::MySqlPool;
 use tracing::instrument;
 
 use crate::{
-    appstate::AppState,
     authentication::{validate_credentials, AuthError, Credentials},
     domain::SubscriberEmail,
+    email_client::EmailClient,
     routes::error_chain_fmt,
+    utils::Data,
 };
 
 #[derive(thiserror::Error)]
@@ -58,17 +59,18 @@ impl IntoResponse for PublishError {
 /// Fetch all confirmed subscribers and send newsletters to them
 #[instrument(
     name = "Publish a newsletter issue",
-    skip(shared_data, body, headers),
+    skip(body, headers, email_client),
     fields(username = tracing::field::Empty, user_id = tracing::field::Empty)
 )]
 pub async fn publish_newsletter(
-    State(shared_data): State<AppState>,
+    State(db_pool): State<MySqlPool>,
+    State(email_client): State<Data<EmailClient>>,
     headers: HeaderMap,
     body: Result<Json<BodyData>, JsonRejection>,
 ) -> Result<impl IntoResponse, PublishError> {
     let credentials = basic_authentication(&headers).map_err(PublishError::AuthError)?;
     tracing::Span::current().record("username", tracing::field::display(&credentials.username));
-    let user_id = validate_credentials(credentials, &shared_data.db_pool).await?;
+    let user_id = validate_credentials(credentials, &db_pool).await?;
     tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
     let body = match body {
@@ -79,13 +81,12 @@ pub async fn publish_newsletter(
         }
     };
 
-    let subscribers = get_confirmed_subscribers(&shared_data.db_pool).await?;
+    let subscribers = get_confirmed_subscribers(&db_pool).await?;
 
     for subscriber in subscribers {
         match subscriber {
             Ok(subscriber) => {
-                shared_data
-                    .email_client
+                email_client
                     .send_email(
                         &subscriber.email,
                         &body.title,

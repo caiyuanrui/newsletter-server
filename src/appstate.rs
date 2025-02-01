@@ -1,12 +1,13 @@
 use std::ops::{Deref, DerefMut};
 
+use axum::extract::FromRef;
 use secrecy::SecretString;
 use serde::Deserialize;
 use sqlx::MySqlPool;
 
 use crate::{email_client::EmailClient, utils::Data};
 
-#[derive(Clone)]
+#[derive(Clone, FromRef)]
 pub struct AppState {
     pub db_pool: MySqlPool,
     pub email_client: Data<EmailClient>,

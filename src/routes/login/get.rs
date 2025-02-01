@@ -9,18 +9,21 @@ use serde::{Deserialize, Serialize};
 use tower_cookies::{cookie::time::Duration, Cookie, Cookies};
 use tracing::instrument;
 
-use crate::appstate::{AppState, HmacSecret};
+use crate::appstate::HmacSecret;
 
-#[instrument(name = "Get Login Form", skip(app_state))]
-pub async fn login_form(cookies: Cookies, State(app_state): State<AppState>) -> impl IntoResponse {
+#[instrument(name = "Get Login Form", skip(hmac_secret))]
+pub async fn login_form(
+    cookies: Cookies,
+    State(hmac_secret): State<HmacSecret>,
+) -> impl IntoResponse {
     let error_html: String = cookies
         .get("_flash")
         .and_then(|cookie| serde_json::from_str::<SignedCookieValue>(cookie.value()).ok())
-        .filter(|value| value.validate(&app_state.hmac_secret))
+        .filter(|value| value.validate(&hmac_secret))
         .map(|value| format!("<p><i>{}</i></p>", value.message))
         .unwrap_or_default();
 
-    let new_value = SignedCookieValue::new("".into(), &app_state.hmac_secret);
+    let new_value = SignedCookieValue::new("".into(), &hmac_secret);
     let cookie = Cookie::build(("_flash", new_value.into_json()))
         .max_age(Duration::ZERO)
         .http_only(true)

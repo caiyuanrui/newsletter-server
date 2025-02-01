@@ -24,7 +24,7 @@ use tracing::Instrument;
 
 use crate::{
     appstate::HmacSecret,
-    routes::{admin_dashboard, login, not_found},
+    routes::{admin_dashboard, change_password, change_password_form, login, not_found},
 };
 
 use super::{
@@ -69,6 +69,8 @@ fn run(
         .route("/login", get(login_form))
         .route("/login", post(login))
         .route("/admin/dashboard", get(admin_dashboard))
+        .route("/admin/password", get(change_password_form))
+        .route("/admin/password", post(change_password))
         .fallback(not_found)
         .layer(tower_cookies::CookieManagerLayer::new())
         .layer(CorsLayer::permissive())

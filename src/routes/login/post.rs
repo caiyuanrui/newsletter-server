@@ -8,11 +8,12 @@ use axum::{
 use hyper::StatusCode;
 use secrecy::SecretString;
 use serde::Deserialize;
+use sqlx::MySqlPool;
 use tower_cookies::Cookie;
 use tracing::instrument;
 
 use crate::{
-    appstate::{AppState, HmacSecret},
+    appstate::HmacSecret,
     authentication::{validate_credentials, AuthError, Credentials},
     session_state::TypedSession,
 };
@@ -25,9 +26,10 @@ pub struct FormData {
     password: SecretString,
 }
 
-#[instrument(name = "Post Login Form", skip(form, app_state, session), fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
+#[instrument(name = "Post Login Form", skip(form, session, db_pool, hmac_secret), fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
 pub async fn login(
-    State(app_state): State<AppState>,
+    State(db_pool): State<MySqlPool>,
+    State(hmac_secret): State<HmacSecret>,
     session: TypedSession,
     Form(form): Form<FormData>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -38,22 +40,22 @@ pub async fn login(
 
     tracing::Span::current().record("username", tracing::field::display(&credentials.username));
 
-    match validate_credentials(credentials, &app_state.db_pool).await {
+    match validate_credentials(credentials, &db_pool).await {
         Ok(user_id) => {
             tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
             session
                 .renew()
                 .await
-                .map_err(|e| login_redirect(anyhow::Error::from(e), &app_state.hmac_secret))?;
+                .map_err(|e| login_redirect(anyhow::Error::from(e), &hmac_secret))?;
             session
                 .insert_user_id(user_id)
                 .await
-                .map_err(|e| login_redirect(anyhow::Error::from(e), &app_state.hmac_secret))?;
+                .map_err(|e| login_redirect(anyhow::Error::from(e), &hmac_secret))?;
 
             Ok((StatusCode::SEE_OTHER, [("Location", "/admin/dashboard")]))
         }
-        Err(e) => Err(login_redirect(e, &app_state.hmac_secret)),
+        Err(e) => Err(login_redirect(e, &hmac_secret)),
     }
 }
 
