@@ -29,13 +29,20 @@ pub async fn admin_dashboard(
 </head>
 <body>
   <p>Welcome {username}!</p>
+  <p>Available actions:</p>
+  <ol>
+    <li><a href="/admin/password">Change password</a></li>
+  </ol>
 </body>
 </html>"#
     ))
     .into_response())
 }
 
-async fn get_username(user_id: SubscriberId, pool: &MySqlPool) -> Result<String, anyhow::Error> {
+pub async fn get_username(
+    user_id: SubscriberId,
+    pool: &MySqlPool,
+) -> Result<String, anyhow::Error> {
     sqlx::query!(
         r#"
       SELECT username
