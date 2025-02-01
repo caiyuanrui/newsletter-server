@@ -18,11 +18,11 @@ static TRACING: LazyLock<()> = LazyLock::new(|| {
     let default_filter_level = "debug".to_string();
     let subscriber_name = "test".to_string();
     match std::env::var("TEST_LOG") {
-        Ok(_) => {
+        Ok(var) if var.to_lowercase() == "enabled" => {
             let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::stdout);
             init_subscriber(subscriber);
         }
-        Err(_) => {
+        _ => {
             let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::sink);
             init_subscriber(subscriber);
         }
@@ -119,15 +119,16 @@ impl TestApp {
             .unwrap()
     }
 
-    pub async fn get_admin_dashboard(&self) -> String {
+    pub async fn get_admin_dashboard(&self) -> reqwest::Response {
         self.api_client
             .get(format!("{}/admin/dashboard", self.address))
             .send()
             .await
             .expect("Failed to execute request")
-            .text()
-            .await
-            .unwrap()
+    }
+
+    pub async fn get_admin_dashboard_html(&self) -> String {
+        self.get_admin_dashboard().await.text().await.unwrap()
     }
 }
 

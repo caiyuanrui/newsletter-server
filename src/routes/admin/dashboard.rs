@@ -5,7 +5,7 @@ use axum::{
     extract::State,
     response::{Html, IntoResponse, Response},
 };
-use hyper::StatusCode;
+use hyper::{header, StatusCode};
 use sqlx::MySqlPool;
 use tracing::instrument;
 
@@ -21,7 +21,7 @@ pub async fn admin_dashboard(
             .await
             .map_err(e500)?
     } else {
-        todo!()
+        return Ok((StatusCode::SEE_OTHER, [(header::LOCATION, "/login")]).into_response());
     };
 
     Ok(Html(format!(
