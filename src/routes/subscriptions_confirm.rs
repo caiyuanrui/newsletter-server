@@ -74,7 +74,7 @@ async fn get_subscriber_id_with_token(
 async fn confirm_subscriber(pool: &MySqlPool, id: SubscriberId) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"UPDATE subscriptions SET status = 'confirmed' WHERE id = ?"#,
-        id.as_str(),
+        id.to_string(),
     )
     .execute(pool)
     .await
