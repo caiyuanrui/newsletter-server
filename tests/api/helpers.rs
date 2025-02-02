@@ -10,6 +10,7 @@ use wiremock::MockServer;
 use zero2prod::{
     configuration::get_configuration,
     domain::SubscriberId,
+    routes::PasswordFormData,
     startup::Application,
     telementry::{get_subscriber, init_subscriber},
 };
@@ -240,7 +241,7 @@ pub fn assert_is_redirect_to(response: &reqwest::Response, location: &str) {
     )
 }
 
-pub fn generate_change_password_form() -> serde_json::Value {
+pub fn generate_random_change_password_form() -> serde_json::Value {
     let current_password = Uuid::new_v4().to_string();
     let new_password = Uuid::new_v4().to_string();
 
@@ -249,4 +250,16 @@ pub fn generate_change_password_form() -> serde_json::Value {
       "new_password": new_password,
       "new_password_check": new_password
     })
+}
+
+pub fn build_change_password_form(
+    current_password: String,
+    new_password: String,
+    new_passwrod_check: String,
+) -> PasswordFormData {
+    PasswordFormData {
+        current_password: current_password.into(),
+        new_password: new_password.into(),
+        new_password_check: new_passwrod_check.into(),
+    }
 }

@@ -26,11 +26,31 @@ pub async fn change_password(
     match session.get_user_id().await.map_err(e500)? {
         None => Ok(see_other("/login")),
         Some(user_id) => {
+            // Reject: Two different new passwords
             if form.new_password.expose_secret() != form.new_password_check.expose_secret() {
                 messages.error(
                     "You entered two different new passwords - the field values must match.",
                 );
 
+                return Ok((
+                    StatusCode::SEE_OTHER,
+                    [(header::LOCATION, "/admin/password")],
+                )
+                    .into_response());
+            }
+
+            // Reject: The new password is too simple or too long
+            let password_length = form.new_password.expose_secret().len();
+            if password_length <= 12 {
+                messages.error("The new password is too short.");
+                return Ok((
+                    StatusCode::SEE_OTHER,
+                    [(header::LOCATION, "/admin/password")],
+                )
+                    .into_response());
+            }
+            if password_length >= 128 {
+                messages.error("The new password is too long.");
                 return Ok((
                     StatusCode::SEE_OTHER,
                     [(header::LOCATION, "/admin/password")],
@@ -46,7 +66,7 @@ pub async fn change_password(
             };
 
             match validate_credentials(credentials, &pool).await {
-                Ok(_) => todo!(),
+                Ok(_user_id) => todo!(),
                 Err(AuthError::InvalidCredentials(_)) => {
                     messages.error("The current password is incorrect.");
                     Ok(see_other("/admin/password"))
