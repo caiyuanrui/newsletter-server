@@ -11,7 +11,7 @@ use sqlx::MySqlPool;
 use uuid::Uuid;
 
 use crate::{
-    authentication::{validate_credentials, AuthError, Credentials},
+    authentication::{self, validate_credentials, AuthError, Credentials},
     routes::admin::dashboard::get_username,
     session_state::TypedSession,
     utils::{e500, see_other},
@@ -66,7 +66,13 @@ pub async fn change_password(
             };
 
             match validate_credentials(credentials, &pool).await {
-                Ok(_user_id) => todo!(),
+                Ok(user_id) => {
+                    authentication::change_password(user_id, form.new_password, &pool)
+                        .await
+                        .map_err(e500)?;
+                    messages.error("Your password has been changed.");
+                    Ok(see_other("/admin/password"))
+                }
                 Err(AuthError::InvalidCredentials(_)) => {
                     messages.error("The current password is incorrect.");
                     Ok(see_other("/admin/password"))

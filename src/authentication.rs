@@ -1,5 +1,8 @@
 use anyhow::Context;
-use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use argon2::{
+    password_hash::{PasswordHasher, SaltString},
+    Argon2, PasswordHash, PasswordVerifier,
+};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use sqlx::MySqlPool;
@@ -84,4 +87,37 @@ async fn get_stored_credentials(
         Ok((subscriber_id, password_hash))
     })
     .transpose()
+}
+
+pub async fn change_password(
+    user_id: SubscriberId,
+    password: SecretString,
+    pool: &MySqlPool,
+) -> Result<(), anyhow::Error> {
+    let password_hash = spawn_blocking_with_tracing(move || compute_password_hash(password))
+        .await?
+        .context("Failed to hash password")?;
+
+    sqlx::query!(
+        r#"
+      UPDATE users
+      SET password_hash = ?
+      WHERE user_id = ?
+      "#,
+        password_hash.expose_secret(),
+        user_id.to_string()
+    )
+    .execute(pool)
+    .await
+    .context("Failed to change user's password in the databse")?;
+
+    Ok(())
+}
+
+fn compute_password_hash(password: SecretString) -> Result<SecretString, anyhow::Error> {
+    let salt = SaltString::generate(&mut rand::thread_rng());
+    let password_hash = Argon2::default()
+        .hash_password(password.expose_secret().as_bytes(), salt.as_salt())?
+        .to_string();
+    Ok(SecretString::from(password_hash))
 }
