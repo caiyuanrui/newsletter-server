@@ -65,7 +65,7 @@ async fn current_password_must_be_valid(pool: MySqlPool) {
     assert_ne!(
         form_data.current_password.expose_secret(),
         app.test_user.password,
-        "We should input a wrong password"
+        "The test expects an invalid password"
     );
     let ser = serde_json::to_value(form_data).unwrap();
     let response = app.post_change_password(&ser).await;
@@ -73,7 +73,6 @@ async fn current_password_must_be_valid(pool: MySqlPool) {
     assert_is_redirect_to(&response, "/admin/password");
 
     // Follow the redirection
-    let html_page = app.get_admin_dashboard_html().await;
-    println!("{}", html_page);
-    assert!(html_page.contains("The current password is incorrect."));
+    let html_page = app.get_change_password_html().await;
+    assert!(html_page.contains("<p><i>The current password is incorrect.</i></p>"));
 }

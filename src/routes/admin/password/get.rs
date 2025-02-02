@@ -11,14 +11,15 @@ pub async fn change_password_form(
     session: TypedSession,
     messages: Messages,
 ) -> Result<Response, Response> {
+    use std::fmt::Write;
+
     match session.get_user_id().await.map_err(e500)? {
         None => Ok(see_other("/login")),
         Some(_user_id) => {
-            let msg_html: String = messages
-                .into_iter()
-                .map(|value| format!("<p><i>{}</i></p>", value.message))
-                .next()
-                .unwrap_or_default();
+            let msg_html: String = messages.into_iter().fold(String::new(), |mut acc, item| {
+                _ = writeln!(acc, "<p><i>{}</i></p>", item.message);
+                acc
+            });
 
             Ok((
                 StatusCode::OK,

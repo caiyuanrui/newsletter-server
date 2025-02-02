@@ -1,4 +1,8 @@
-use axum::{body::Body, extract::State, response::Response, Form};
+use axum::{
+    extract::State,
+    response::{IntoResponse, Response},
+    Form,
+};
 use axum_messages::Messages;
 use hyper::{header, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
@@ -26,12 +30,12 @@ pub async fn change_password(
                 messages.error(
                     "You entered two different new passwords - the field values must match.",
                 );
-                let response = Response::builder()
-                    .status(StatusCode::SEE_OTHER)
-                    .header(header::LOCATION, "/admin/password")
-                    .body(Body::empty())
-                    .unwrap();
-                return Ok(response);
+
+                return Ok((
+                    StatusCode::SEE_OTHER,
+                    [(header::LOCATION, "/admin/password")],
+                )
+                    .into_response());
             }
 
             let username = get_username(user_id, &pool).await.map_err(e500)?;
@@ -44,14 +48,10 @@ pub async fn change_password(
             match validate_credentials(credentials, &pool).await {
                 Ok(_) => todo!(),
                 Err(AuthError::InvalidCredentials(_)) => {
-                    messages.error("The current password is incorrect");
-                    Ok(Response::builder()
-                        .status(StatusCode::SEE_OTHER)
-                        .header(header::LOCATION, "/admin/password")
-                        .body(Body::empty())
-                        .unwrap())
+                    messages.error("The current password is incorrect.");
+                    Ok(see_other("/admin/password"))
                 }
-                Err(AuthError::UnexpectedError(e)) => Err(e500(e)),
+                Err(e @ AuthError::UnexpectedError(_)) => Err(e500(e)),
             }
         }
     }
