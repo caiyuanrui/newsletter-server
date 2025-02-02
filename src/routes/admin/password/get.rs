@@ -1,42 +1,27 @@
-use axum::{
-    extract::State,
-    response::{Html, IntoResponse, Response},
-};
-use hyper::{header, StatusCode};
-use tower_cookies::{cookie::time::Duration, Cookie, Cookies};
+use axum::response::{Html, IntoResponse, Response};
+use axum_messages::Messages;
+use hyper::StatusCode;
 
 use crate::{
-    appstate::HmacSecret,
-    routes::SignedCookieValue,
     session_state::TypedSession,
     utils::{e500, see_other},
 };
 
 pub async fn change_password_form(
     session: TypedSession,
-    cookies: Cookies,
-    State(secret): State<HmacSecret>,
+    messages: Messages,
 ) -> Result<Response, Response> {
     match session.get_user_id().await.map_err(e500)? {
         None => Ok(see_other("/login")),
         Some(_user_id) => {
-            let msg_html = cookies
-                .get("_flash")
-                .and_then(|cookie| serde_json::from_str::<SignedCookieValue>(cookie.value()).ok())
-                .filter(|value| value.validate(&secret))
+            let msg_html: String = messages
+                .into_iter()
                 .map(|value| format!("<p><i>{}</i></p>", value.message))
+                .next()
                 .unwrap_or_default();
-
-            let new_value = SignedCookieValue::new("".into(), &secret);
-            let cookie = Cookie::build(("_flash", new_value.into_json()))
-                .max_age(Duration::ZERO)
-                .http_only(true)
-                .secure(true)
-                .build();
 
             Ok((
                 StatusCode::OK,
-                [(header::SET_COOKIE, cookie.to_string())],
                 Html(format!(
                     r#"<!doctype html>
             <html lang="en">
@@ -74,6 +59,7 @@ pub async fn change_password_form(
                     />
                   </label>
                   <br />
+                  <button type="submit">Submit</button>
                 </form>
               </body>
             </html>

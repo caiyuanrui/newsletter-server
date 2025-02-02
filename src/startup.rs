@@ -10,6 +10,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use axum_messages::{Messages, MessagesManagerLayer};
 use http_body_util::BodyExt;
 use secrecy::ExposeSecret;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
@@ -55,7 +56,7 @@ fn run(
     };
 
     let redis_store = RedisStore::new(redis_pool);
-    let redis_layer = SessionManagerLayer::new(redis_store)
+    let session_layer = SessionManagerLayer::new(redis_store)
         .with_secure(false)
         .with_signed(secret_key)
         .with_expiry(Expiry::OnInactivity(time::Duration::seconds(10)));
@@ -71,14 +72,39 @@ fn run(
         .route("/admin/dashboard", get(admin_dashboard))
         .route("/admin/password", get(change_password_form))
         .route("/admin/password", post(change_password))
+        .route("/read-messages", get(read_messages_handler))
+        .route("/set-messages", get(set_messages_handler))
         .fallback(not_found)
         .layer(tower_cookies::CookieManagerLayer::new())
         .layer(CorsLayer::permissive())
-        .layer(redis_layer)
+        .layer(MessagesManagerLayer)
+        .layer(session_layer)
         .layer(middleware::from_fn(print_request_response))
         .with_state(shared_state);
 
     Server::new(axum::serve(listener, app).into_future())
+}
+
+async fn set_messages_handler(messages: Messages) -> impl IntoResponse {
+    messages
+        .info("Hello, world!")
+        .debug("This is a debug message.");
+
+    axum::response::Redirect::to("/read-messages")
+}
+
+async fn read_messages_handler(messages: Messages) -> impl IntoResponse {
+    let messages = messages
+        .into_iter()
+        .map(|message| format!("{}: {}", message.level, message))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if messages.is_empty() {
+        "No messages yet!".to_string()
+    } else {
+        messages
+    }
 }
 
 pub struct Application {

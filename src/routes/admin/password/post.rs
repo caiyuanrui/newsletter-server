@@ -1,15 +1,14 @@
 use axum::{body::Body, extract::State, response::Response, Form};
+use axum_messages::Messages;
 use hyper::{header, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::ser::SerializeStruct;
 use sqlx::MySqlPool;
-use tower_cookies::Cookie;
 use uuid::Uuid;
 
 use crate::{
-    appstate::HmacSecret,
     authentication::{validate_credentials, AuthError, Credentials},
-    routes::{admin::dashboard::get_username, SignedCookieValue},
+    routes::admin::dashboard::get_username,
     session_state::TypedSession,
     utils::{e500, see_other},
 };
@@ -17,25 +16,19 @@ use crate::{
 pub async fn change_password(
     session: TypedSession,
     State(pool): State<MySqlPool>,
-    State(secret): State<HmacSecret>,
+    messages: Messages,
     Form(form): Form<FormData>,
 ) -> Result<Response, Response> {
     match session.get_user_id().await.map_err(e500)? {
         None => Ok(see_other("/login")),
         Some(user_id) => {
             if form.new_password.expose_secret() != form.new_password_check.expose_secret() {
-                let cookie_value = SignedCookieValue::new(
-                    "You entered two different new passwords - the field values must match.".into(),
-                    &secret,
+                messages.error(
+                    "You entered two different new passwords - the field values must match.",
                 );
-                let cookie = Cookie::build(("_flash", cookie_value.into_json()))
-                    .http_only(true)
-                    .secure(true)
-                    .build();
                 let response = Response::builder()
                     .status(StatusCode::SEE_OTHER)
                     .header(header::LOCATION, "/admin/password")
-                    .header(header::SET_COOKIE, cookie.to_string())
                     .body(Body::empty())
                     .unwrap();
                 return Ok(response);
@@ -51,16 +44,10 @@ pub async fn change_password(
             match validate_credentials(credentials, &pool).await {
                 Ok(_) => todo!(),
                 Err(AuthError::InvalidCredentials(_)) => {
-                    let cookie_value =
-                        SignedCookieValue::new("The current password is incorrect".into(), &secret);
-                    let cookie = Cookie::build(("_flash", cookie_value.into_json()))
-                        .http_only(true)
-                        .secure(true)
-                        .build();
+                    messages.error("The current password is incorrect");
                     Ok(Response::builder()
                         .status(StatusCode::SEE_OTHER)
                         .header(header::LOCATION, "/admin/password")
-                        .header(header::SET_COOKIE, cookie.to_string())
                         .body(Body::empty())
                         .unwrap())
                 }

@@ -224,6 +224,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-messages"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d67ce6e7bc1e1e71f2a4e86d418045a29c63c4ebb631f3d9bb2f81c4958ea391"
+dependencies = [
+ "axum-core",
+ "http",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tower",
+ "tower-sessions-core",
+ "tracing",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1471,7 +1487,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -3852,6 +3868,7 @@ dependencies = [
  "argon2",
  "axum",
  "axum-macros",
+ "axum-messages",
  "base64 0.22.1",
  "chrono",
  "claim",
