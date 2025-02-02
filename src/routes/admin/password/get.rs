@@ -1,25 +1,30 @@
 use axum::response::{Html, IntoResponse, Response};
 use axum_messages::Messages;
 use hyper::StatusCode;
+use tracing::instrument;
+
+use std::fmt::Write;
 
 use crate::{
     session_state::TypedSession,
     utils::{e500, see_other},
 };
 
+#[instrument(name = "Change password form", skip_all, fields(user_id, messages))]
 pub async fn change_password_form(
     session: TypedSession,
     messages: Messages,
 ) -> Result<Response, Response> {
-    use std::fmt::Write;
-
     match session.get_user_id().await.map_err(e500)? {
         None => Ok(see_other("/login")),
-        Some(_user_id) => {
+        Some(user_id) => {
             let msg_html: String = messages.into_iter().fold(String::new(), |mut acc, item| {
                 _ = writeln!(acc, "<p><i>{}</i></p>", item.message);
                 acc
             });
+
+            tracing::Span::current().record("user_id", user_id.to_string());
+            tracing::Span::current().record("messages", &msg_html);
 
             Ok((
                 StatusCode::OK,

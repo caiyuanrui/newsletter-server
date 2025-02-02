@@ -1,16 +1,16 @@
 use axum::response::{Html, IntoResponse};
 use axum_messages::Messages;
 use hyper::StatusCode;
-
 use tracing::instrument;
+
+use std::fmt::Write;
 
 #[instrument(name = "Get Login Form")]
 pub async fn login_form(messages: Messages) -> impl IntoResponse {
-    let error_html: String = messages
-        .into_iter()
-        .map(|message| format!("<p><i>{}</i></p>", message.message))
-        .next()
-        .unwrap_or_default();
+    let msg_html: String = messages.into_iter().fold(String::new(), |mut acc, item| {
+        _ = writeln!(acc, "<p><i>{}</i></p>", item.message);
+        acc
+    });
 
     (
         StatusCode::OK,
@@ -22,7 +22,7 @@ pub async fn login_form(messages: Messages) -> impl IntoResponse {
         <title>Login</title>
       </head>
       <body>
-      {error_html}
+      {msg_html}
         <form action="/login" method="post">
           <label
             >Username

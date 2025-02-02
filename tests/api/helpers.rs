@@ -109,15 +109,16 @@ impl TestApp {
             .expect("Failed to execute request")
     }
 
-    pub async fn get_login_form(&self) -> String {
+    pub async fn get_login(&self) -> reqwest::Response {
         self.api_client
             .get(format!("{}/login", self.address))
             .send()
             .await
             .expect("Failed to execute request")
-            .text()
-            .await
-            .unwrap()
+    }
+
+    pub async fn get_login_html(&self) -> String {
+        self.get_login().await.text().await.unwrap()
     }
 
     pub async fn get_admin_dashboard(&self) -> reqwest::Response {
@@ -151,6 +152,14 @@ impl TestApp {
         self.api_client
             .post(format!("{}/admin/password", self.address))
             .form(body)
+            .send()
+            .await
+            .expect("Failed to execute request")
+    }
+
+    pub async fn post_logout(&self) -> reqwest::Response {
+        self.api_client
+            .post(format!("{}/admin/logout", self.address))
             .send()
             .await
             .expect("Failed to execute request")

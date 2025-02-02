@@ -34,6 +34,11 @@ impl TypedSession {
             .transpose()
             .map_err(tower_sessions::session::Error::SerdeJson)
     }
+
+    pub async fn logout(self) -> Result<(), tower_sessions::session::Error> {
+        // must use `flush`, if `delete` is used, the middleware will return a parser error.
+        self.0.flush().await
+    }
 }
 
 impl<S> FromRequestParts<S> for TypedSession
@@ -48,9 +53,4 @@ where
     ) -> Result<Self, Self::Rejection> {
         parts.extract::<Session>().await.map(Self)
     }
-}
-
-#[cfg(test)]
-mod tests {
-    // use super::*;
 }
