@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Extension, State},
     response::{IntoResponse, Response},
     Form,
 };
@@ -8,24 +8,23 @@ use hyper::{header, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::ser::SerializeStruct;
 use sqlx::MySqlPool;
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::{
     authentication::{self, validate_credentials, AuthError, Credentials},
-    domain::SubscriberId,
+    domain::UserId,
     routes::admin::dashboard::get_username,
-    session_state::TypedSession,
     utils::{e500, see_other},
 };
 
+#[instrument(name = "change password", skip_all)]
 pub async fn change_password(
-    session: TypedSession,
     State(pool): State<MySqlPool>,
     messages: Messages,
+    Extension(user_id): Extension<UserId>,
     Form(form): Form<FormData>,
 ) -> Result<Response, Response> {
-    let user_id = reject_anonymous_user(session, messages.clone()).await?;
-
     // Reject: Two different new passwords
     if form.new_password.expose_secret() != form.new_password_check.expose_secret() {
         messages.error("You entered two different new passwords - the field values must match.");
@@ -77,17 +76,6 @@ pub async fn change_password(
         }
         Err(e @ AuthError::UnexpectedError(_)) => Err(e500(e)),
     }
-}
-
-async fn reject_anonymous_user(
-    session: TypedSession,
-    messages: Messages,
-) -> Result<SubscriberId, Response> {
-    session.get_user_id().await.map_err(e500)?.ok_or_else(|| {
-        let e = anyhow::anyhow!("The user has not logged in");
-        messages.error(e.to_string());
-        (StatusCode::SEE_OTHER, [(header::LOCATION, "/login")]).into_response()
-    })
 }
 
 #[derive(Debug, serde::Deserialize)]

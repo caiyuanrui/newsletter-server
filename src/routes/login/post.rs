@@ -23,7 +23,7 @@ pub struct FormData {
     password: SecretString,
 }
 
-#[instrument(name = "Post Login Form", skip(form, session, db_pool), fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
+#[instrument(name = "Post Login Form", skip_all, fields(username = tracing::field::Empty, user_id = tracing::field::Empty))]
 pub async fn login(
     State(db_pool): State<MySqlPool>,
     messages: Messages,

@@ -2,29 +2,24 @@ use std::{future::IntoFuture, time::Duration};
 
 use anyhow::Context;
 use axum::{
-    body::{Body, Bytes},
-    extract::Request,
-    http,
-    middleware::{self, Next},
-    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 use axum_messages::MessagesManagerLayer;
-use http_body_util::BodyExt;
 use secrecy::ExposeSecret;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
-use tower_cookies::{cookie::time, Key};
-use tower_http::cors::CorsLayer;
+use tower::ServiceBuilder;
+use tower_cookies::cookie::time;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tower_sessions::{Expiry, SessionManagerLayer};
 use tower_sessions_redis_store::{
     fred::prelude::{ClientLike, Config, Pool},
     RedisStore,
 };
-use tracing::Instrument;
 
 use crate::{
     appstate::HmacSecret,
+    authentication::reject_anonymous_user,
     routes::{admin_dashboard, change_password, change_password_form, log_out, login, not_found},
 };
 
@@ -39,13 +34,13 @@ use super::{
 
 fn run(
     listener: tokio::net::TcpListener,
-    db_pool: sqlx::MySqlPool,
+    db_pool: MySqlPool,
     redis_pool: Pool,
     email_client: EmailClient,
     base_url: String,
     hmac_secret: HmacSecret,
 ) -> Server {
-    let secret_key = Key::from(hmac_secret.expose_secret().as_bytes());
+    let secret_key = tower_sessions::cookie::Key::from(hmac_secret.expose_secret().as_bytes());
 
     let base_url = super::appstate::ApplicationBaseUrl(base_url);
     let shared_state = AppState {
@@ -55,11 +50,10 @@ fn run(
         hmac_secret,
     };
 
-    let redis_store = RedisStore::new(redis_pool);
-    let session_layer = SessionManagerLayer::new(redis_store)
+    let session_layer = SessionManagerLayer::new(RedisStore::new(redis_pool))
         .with_secure(false)
         .with_signed(secret_key)
-        .with_expiry(Expiry::OnInactivity(time::Duration::seconds(10)));
+        .with_expiry(Expiry::OnInactivity(time::Duration::minutes(10)));
 
     let app = Router::new()
         .route("/health_check", get(health_check))
@@ -69,16 +63,23 @@ fn run(
         .route("/", get(home))
         .route("/login", get(login_form))
         .route("/login", post(login))
-        .route("/admin/dashboard", get(admin_dashboard))
-        .route("/admin/password", get(change_password_form))
-        .route("/admin/password", post(change_password))
-        .route("/admin/logout", post(log_out))
+        .nest(
+            "/admin",
+            Router::new()
+                .route("/dashboard", get(admin_dashboard))
+                .route("/password", get(change_password_form))
+                .route("/password", post(change_password))
+                .route("/logout", post(log_out))
+                .route_layer(axum::middleware::from_fn(reject_anonymous_user)),
+        )
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(CorsLayer::permissive())
+                .layer(session_layer)
+                .layer(MessagesManagerLayer),
+        )
         .fallback(not_found)
-        .layer(tower_cookies::CookieManagerLayer::new())
-        .layer(CorsLayer::permissive())
-        .layer(MessagesManagerLayer)
-        .layer(session_layer)
-        .layer(middleware::from_fn(print_request_response))
         .with_state(shared_state);
 
     Server::new(axum::serve(listener, app).into_future())
@@ -93,49 +94,8 @@ pub struct Application {
 
 impl Application {
     pub async fn build(configuration: Settings) -> Result<Self, anyhow::Error> {
-        // redis
-        let redis_config = Config::from_url(configuration.redis_uri.expose_secret())?;
-        let redis_pool = Pool::new(redis_config, None, None, None, 6)?;
-
-        // database
         let db_pool = get_connection_pool(&configuration.database);
-        // tcp lst
-        let addr = format!(
-            "{}:{}",
-            configuration.application.host, configuration.application.port
-        );
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
-        let port = listener.local_addr().unwrap().port();
-        // email client
-        let url = configuration
-            .email_client
-            .base_url
-            .as_str()
-            .try_into()
-            .expect("Failed to parse the url");
-        let sender_email = configuration
-            .email_client
-            .sender()
-            .expect("Failed to parse the email sender's name");
-        let timeout = configuration.email_client.timeout();
-        let authorization_token = configuration.email_client.authorization_token.clone();
-        let email_client = EmailClient::new(url, sender_email, authorization_token, timeout);
-
-        let server = run(
-            listener,
-            db_pool.clone(),
-            redis_pool.clone(),
-            email_client,
-            configuration.application.base_url,
-            configuration.application.hmac_secret,
-        );
-
-        Ok(Self {
-            server,
-            port,
-            db_pool,
-            redis_pool,
-        })
+        Self::build_with_db(configuration, db_pool).await
     }
 
     /// This is used for test.
@@ -212,48 +172,4 @@ fn get_connection_pool(config: &DatabaseSettings) -> MySqlPool {
     MySqlPoolOptions::new()
         .acquire_timeout(Duration::from_secs(2))
         .connect_lazy_with(config.with_db())
-}
-
-async fn print_request_response(
-    req: Request,
-    next: Next,
-) -> Result<impl IntoResponse, (http::StatusCode, String)> {
-    let uri = req.uri();
-    let method = req.method();
-
-    let span = tracing::info_span!("http request=", method = %method, uri = %uri);
-
-    let (parts, body) = req.into_parts();
-    let bytes = buffer_and_print("request", body).await?;
-    let req = Request::from_parts(parts, Body::from(bytes));
-
-    let res = next.run(req).instrument(span).await;
-
-    let (parts, body) = res.into_parts();
-    let bytes = buffer_and_print("response", body).await?;
-    let res = Response::from_parts(parts, Body::from(bytes));
-
-    Ok(res)
-}
-
-async fn buffer_and_print<B>(direction: &str, body: B) -> Result<Bytes, (http::StatusCode, String)>
-where
-    B: axum::body::HttpBody<Data = Bytes>,
-    B::Error: std::fmt::Display,
-{
-    let bytes = match body.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(err) => {
-            return Err((
-                http::StatusCode::BAD_REQUEST,
-                format!("failed to read {direction} body: {err}"),
-            ))
-        }
-    };
-
-    if let Ok(body) = std::str::from_utf8(&bytes) {
-        tracing::debug!("{direction} body = {body:?}");
-    }
-
-    Ok(bytes)
 }

@@ -1,8 +1,9 @@
 use axum::{extract::FromRequestParts, RequestPartsExt};
 use tower_sessions::Session;
 
-use crate::domain::SubscriberId;
+use crate::domain::UserId;
 
+#[derive(Debug, Clone)]
 pub struct TypedSession(Session);
 
 impl TypedSession {
@@ -19,18 +20,16 @@ impl TypedSession {
     /// - If the session has not been hydrated and loading from the store fails, we fail with `Error::Store`.
     pub async fn insert_user_id(
         &self,
-        user_id: SubscriberId,
+        user_id: UserId,
     ) -> Result<(), tower_sessions::session::Error> {
         self.0.insert(Self::USER_ID_KEY, user_id).await
     }
 
-    pub async fn get_user_id(
-        &self,
-    ) -> Result<Option<SubscriberId>, tower_sessions::session::Error> {
+    pub async fn get_user_id(&self) -> Result<Option<UserId>, tower_sessions::session::Error> {
         self.0
             .get_value(Self::USER_ID_KEY)
             .await?
-            .map(serde_json::from_value::<SubscriberId>)
+            .map(serde_json::from_value::<UserId>)
             .transpose()
             .map_err(tower_sessions::session::Error::SerdeJson)
     }

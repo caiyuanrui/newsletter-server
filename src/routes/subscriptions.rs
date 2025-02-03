@@ -12,7 +12,7 @@ use tracing::instrument;
 
 use crate::{
     appstate::ApplicationBaseUrl,
-    domain::{self, NewSubscriber, SubscriberId},
+    domain::{self, NewSubscriber, UserId},
     email_client::EmailClient,
     utils::Data,
 };
@@ -123,8 +123,8 @@ pub async fn send_confirmation_email(
 pub async fn insert_subscriber(
     txn: &mut Transaction<'_, MySql>,
     new_subscriber: &NewSubscriber,
-) -> Result<SubscriberId, sqlx::Error> {
-    let subscriber_id = SubscriberId::new_v4();
+) -> Result<UserId, sqlx::Error> {
+    let subscriber_id = UserId::new_v4();
 
     sqlx::query!(
         r#"
@@ -149,7 +149,7 @@ VALUES (?, ?, ?, ?, 'pending_confirmation')
 pub async fn store_token(
     txn: &mut Transaction<'_, MySql>,
     subscription_token: &str,
-    subscriber_id: SubscriberId,
+    subscriber_id: UserId,
 ) -> Result<(), StoreTokenError> {
     sqlx::query!(
         r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)  VALUES (?, ?)"#,

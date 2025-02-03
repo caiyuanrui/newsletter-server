@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use std::str::FromStr;
 
-use super::{domain::SubscriberId, telementry::spawn_blocking_with_tracing};
+use crate::{domain::UserId, telementry::spawn_blocking_with_tracing};
 
 #[derive(thiserror::Error, Debug)]
 pub enum AuthError {
@@ -32,7 +32,7 @@ pub struct Credentials {
 pub async fn validate_credentials(
     credentials: Credentials,
     pool: &MySqlPool,
-) -> Result<SubscriberId, AuthError> {
+) -> Result<UserId, AuthError> {
     let (user_id, expected_password_hash) = get_stored_credentials(&credentials, pool)
         .await
         .map_err(AuthError::UnexpectedError)?
@@ -72,7 +72,7 @@ fn verify_password_hash(
 async fn get_stored_credentials(
     credentials: &Credentials,
     pool: &MySqlPool,
-) -> Result<Option<(SubscriberId, SecretString)>, anyhow::Error> {
+) -> Result<Option<(UserId, SecretString)>, anyhow::Error> {
     sqlx::query!(
         r#"SELECT user_id, password_hash FROM users WHERE username = ?"#,
         credentials.username,
@@ -81,8 +81,7 @@ async fn get_stored_credentials(
     .await
     .context("Failed to perform a query to retrieve stored credentials")?
     .map(|row| {
-        let subscriber_id =
-            SubscriberId::from_str(&row.user_id).context("Failed to parse user id")?;
+        let subscriber_id = UserId::from_str(&row.user_id).context("Failed to parse user id")?;
         let password_hash = SecretString::new(row.password_hash.into_boxed_str());
         Ok((subscriber_id, password_hash))
     })
@@ -90,7 +89,7 @@ async fn get_stored_credentials(
 }
 
 pub async fn change_password(
-    user_id: SubscriberId,
+    user_id: UserId,
     password: SecretString,
     pool: &MySqlPool,
 ) -> Result<(), anyhow::Error> {

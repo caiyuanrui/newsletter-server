@@ -9,7 +9,7 @@ use serde::Deserialize;
 use sqlx::MySqlPool;
 use tracing::instrument;
 
-use crate::domain::SubscriberId;
+use crate::domain::UserId;
 
 #[instrument(name = "Confirm a pending subscriber", skip(params, db_pool))]
 pub async fn confirm(
@@ -49,7 +49,7 @@ pub struct Params {
 async fn get_subscriber_id_with_token(
     token: &str,
     pool: &MySqlPool,
-) -> Result<Option<SubscriberId>, sqlx::Error> {
+) -> Result<Option<UserId>, sqlx::Error> {
     let result = sqlx::query!(
         r#"SELECT subscriber_id FROM subscription_tokens WHERE subscription_token = ?"#,
         token,
@@ -62,12 +62,12 @@ async fn get_subscriber_id_with_token(
     })?;
 
     Ok(result.map(|r| {
-        SubscriberId::from_str(&r.subscriber_id).expect("Failed to parse subscriber_id into uuid")
+        UserId::from_str(&r.subscriber_id).expect("Failed to parse subscriber_id into uuid")
     }))
 }
 
 #[instrument(name = "Make the subscriber status as confirmed", skip(pool, id))]
-async fn confirm_subscriber(pool: &MySqlPool, id: SubscriberId) -> Result<(), sqlx::Error> {
+async fn confirm_subscriber(pool: &MySqlPool, id: UserId) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"UPDATE subscriptions SET status = 'confirmed' WHERE id = ?"#,
         id.to_string(),

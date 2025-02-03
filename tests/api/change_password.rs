@@ -12,6 +12,9 @@ async fn you_must_be_logged_in_to_see_the_change_password_form(pool: MySqlPool) 
     let app = spawn_test_app(pool).await;
     let response = app.get_change_password().await;
     assert_is_redirect_to(&response, "/login");
+
+    let html_page = app.get_login_html().await;
+    assert!(html_page.contains("<p><i>The user has not logged in.</i></p>"));
 }
 
 #[sqlx::test]
@@ -22,6 +25,9 @@ async fn you_must_be_logged_in_to_change_your_password(pool: MySqlPool) {
         .post_change_password(&generate_random_change_password_form())
         .await;
     assert_is_redirect_to(&response, "/login");
+
+    let html_page = app.get_login_html().await;
+    assert!(html_page.contains("<p><i>The user has not logged in.</i></p>"));
 }
 
 #[sqlx::test]

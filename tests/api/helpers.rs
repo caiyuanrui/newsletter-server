@@ -9,7 +9,7 @@ use uuid::Uuid;
 use wiremock::MockServer;
 use zero2prod::{
     configuration::get_configuration,
-    domain::SubscriberId,
+    domain::UserId,
     routes::PasswordFormData,
     startup::Application,
     telementry::{get_subscriber, init_subscriber},
@@ -43,7 +43,7 @@ pub struct TestApp {
 
 #[derive(Debug)]
 pub struct TestUser {
-    pub user_id: SubscriberId,
+    pub user_id: UserId,
     pub username: String,
     pub password: String,
 }
@@ -169,7 +169,7 @@ impl TestApp {
 impl TestUser {
     pub fn generate() -> Self {
         Self {
-            user_id: SubscriberId::new_v4(),
+            user_id: UserId::new_v4(),
             username: fake::faker::name::en::Name().fake(),
             password: Uuid::new_v4().into(),
         }
