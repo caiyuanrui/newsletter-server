@@ -1,10 +1,9 @@
 use axum::{
     extract::{Extension, State},
-    response::{IntoResponse, Response},
+    response::Response,
     Form,
 };
 use axum_messages::Messages;
-use hyper::{header, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::ser::SerializeStruct;
 use sqlx::MySqlPool;
@@ -28,31 +27,18 @@ pub async fn change_password(
     // Reject: Two different new passwords
     if form.new_password.expose_secret() != form.new_password_check.expose_secret() {
         messages.error("You entered two different new passwords - the field values must match.");
-
-        return Ok((
-            StatusCode::SEE_OTHER,
-            [(header::LOCATION, "/admin/password")],
-        )
-            .into_response());
+        return Ok(see_other("/admin/password"));
     }
 
     // Reject: The new password is too simple or too long
     let password_length = form.new_password.expose_secret().len();
     if password_length <= 12 {
         messages.error("The new password is too short.");
-        return Ok((
-            StatusCode::SEE_OTHER,
-            [(header::LOCATION, "/admin/password")],
-        )
-            .into_response());
+        return Ok(see_other("/admin/password"));
     }
     if password_length >= 128 {
         messages.error("The new password is too long.");
-        return Ok((
-            StatusCode::SEE_OTHER,
-            [(header::LOCATION, "/admin/password")],
-        )
-            .into_response());
+        return Ok(see_other("/admin/password"));
     }
 
     let username = get_username(user_id, &pool).await.map_err(e500)?;

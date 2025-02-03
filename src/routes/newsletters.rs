@@ -59,7 +59,7 @@ impl IntoResponse for PublishError {
 /// Fetch all confirmed subscribers and send newsletters to them
 #[instrument(
     name = "Publish a newsletter issue",
-    skip(body, headers, email_client),
+    skip_all,
     fields(username = tracing::field::Empty, user_id = tracing::field::Empty)
 )]
 pub async fn publish_newsletter(
