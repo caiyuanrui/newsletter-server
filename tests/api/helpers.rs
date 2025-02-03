@@ -65,14 +65,26 @@ impl TestApp {
             .expect("Failed to execute request")
     }
 
-    pub async fn post_newsletters(&self, body: &serde_json::Value) -> reqwest::Response {
+    pub async fn post_newsletters(&self, body: impl Into<reqwest::Body>) -> reqwest::Response {
         self.api_client
-            .post(format!("{}/newsletters", self.address))
-            .basic_auth(&self.test_user.username, Some(&self.test_user.password))
-            .json(body)
+            .post(format!("{}/admin/newsletters", &self.address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body)
             .send()
             .await
             .expect("Failed to execute request")
+    }
+
+    pub async fn get_newsletters(&self) -> reqwest::Response {
+        self.api_client
+            .get(format!("{}/admin/newsletters", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request")
+    }
+
+    pub async fn get_newsletters_html(&self) -> String {
+        self.get_newsletters().await.text().await.unwrap()
     }
 
     pub async fn get_confirmation_links(

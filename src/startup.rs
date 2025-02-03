@@ -18,17 +18,15 @@ use tower_sessions_redis_store::{
 };
 
 use crate::{
-    appstate::HmacSecret,
+    appstate::{AppState, HmacSecret},
     authentication::reject_anonymous_user,
-    routes::{admin_dashboard, change_password, change_password_form, log_out, login, not_found},
-};
-
-use super::{
-    appstate::AppState,
-    configuration::DatabaseSettings,
-    configuration::Settings,
+    configuration::{DatabaseSettings, Settings},
     email_client::EmailClient,
-    routes::{confirm, health_check, home, login_form, publish_newsletter, subscribe},
+    routes::{
+        admin_dashboard, change_password, change_password_form, log_out, login, not_found,
+        publish_newsletter, publish_newsletter_form,
+    },
+    routes::{confirm, health_check, home, login_form, subscribe},
     utils::{Data, Server},
 };
 
@@ -59,7 +57,6 @@ fn run(
         .route("/health_check", get(health_check))
         .route("/subscriptions", post(subscribe))
         .route("/subscriptions/confirm", get(confirm))
-        .route("/newsletters", post(publish_newsletter))
         .route("/", get(home))
         .route("/login", get(login_form))
         .route("/login", post(login))
@@ -70,6 +67,8 @@ fn run(
                 .route("/password", get(change_password_form))
                 .route("/password", post(change_password))
                 .route("/logout", post(log_out))
+                .route("/newsletters", get(publish_newsletter_form))
+                .route("/newsletters", post(publish_newsletter))
                 .route_layer(axum::middleware::from_fn(reject_anonymous_user)),
         )
         .layer(
