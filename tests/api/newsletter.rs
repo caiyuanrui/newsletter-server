@@ -1,3 +1,4 @@
+use fake::Fake;
 use serde::Serialize;
 use sqlx::MySqlPool;
 use wiremock::{matchers, Mock, ResponseTemplate};
@@ -192,8 +193,43 @@ async fn succeed_to_publish_a_newsletter_form(pool: MySqlPool) {
     assert!(html_page.contains("<p><i>The newsletter issue has been published!</i></p>"))
 }
 
+#[sqlx::test]
+async fn create_10_confirmed_subscribers_and_send_a_newsletter_to_them(pool: MySqlPool) {
+    let app = spawn_test_app(pool).await;
+
+    let total_subscriber_nums = 10;
+    for _ in 0..total_subscriber_nums {
+        create_confirmed_subscriber(&app).await;
+    }
+
+    // Login
+    let response = app
+        .post_login(&serde_json::json!({
+          "username": app.test_user.username,
+          "password": app.test_user.password
+        }))
+        .await;
+    assert_is_redirect_to(&response, "/admin/dashboard");
+
+    // Send a newsletter to all subscribers
+    assert_eq!(
+        send_a_newsletter_to_all_subscribers(&app).await,
+        total_subscriber_nums
+    );
+
+    // We have a welcome email to every new subsriber.
+    // And that's why we multiply `total_subscriber_nums` by 2.
+    assert_eq!(
+        total_subscriber_nums as usize * 2,
+        app.email_server.received_requests().await.unwrap().len()
+    );
+}
+
 async fn create_unconfirmed_subscriber(test_app: &TestApp) -> ConfirmationLink {
-    let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
+    let name: String = fake::faker::name::en::Name().fake();
+    let email: String = fake::faker::internet::en::SafeEmail().fake();
+    let body =
+        serde_urlencoded::to_string([("name", name.as_str()), ("email", email.as_str())]).unwrap();
     let _mock_guard = Mock::given(matchers::path("/email"))
         .and(matchers::method("POST"))
         .respond_with(ResponseTemplate::new(200))
@@ -220,6 +256,32 @@ async fn create_confirmed_subscriber(app: &TestApp) {
         .unwrap()
         .error_for_status()
         .unwrap();
+}
+
+async fn send_a_newsletter_to_all_subscribers(app: &TestApp) -> u64 {
+    let total_subscriber_nums = sqlx::query!(r#"SELECT COUNT(*) as total FROM subscriptions"#)
+        .fetch_one(&app.db_pool)
+        .await
+        .unwrap()
+        .total as u64;
+    let _mock_guard = Mock::given(matchers::path("/email"))
+        .and(matchers::method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(total_subscriber_nums)
+        .mount_as_scoped(&app.email_server)
+        .await;
+    let body = NewsletterFormBuilder::new()
+        .with_title("title")
+        .with_html_content("html_content")
+        .with_text_content("text_content");
+    let response = app.post_newsletters(body.to_string()).await;
+
+    assert_is_redirect_to(&response, "/admin/newsletters");
+
+    let html_page = app.get_newsletters_html().await;
+    assert!(html_page.contains("The newsletter issue has been published!"));
+
+    total_subscriber_nums
 }
 
 #[derive(Debug, Serialize)]

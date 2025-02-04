@@ -48,6 +48,7 @@ pub struct TestUser {
     pub password: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct ConfirmationLink {
     pub html: reqwest::Url,
     #[allow(dead_code)]

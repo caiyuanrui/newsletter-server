@@ -6,6 +6,7 @@ use axum::{
 };
 use hyper::StatusCode;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use serde::Deserialize;
 use serde_json::json;
 use sqlx::{MySql, MySqlPool, Transaction};
 use tracing::instrument;
@@ -92,28 +93,53 @@ pub async fn send_confirmation_email(
     base_url: &ApplicationBaseUrl,
     token: &str,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let confirmation_link = format!(
-        "{}/subscriptions/confirm?token={}",
-        base_url.as_str(),
-        token
-    );
-    let html_content = format!(
-        r#"Welcome to our newsletter!<br />
-    Click <a href="{confirmation_link}">here</a> to confirm your subscription."#,
-    );
-    let text_content = format!(
-        r#"Welcome to our newsletter!
-    Visit {confirmation_link} to confirm your subscription."#,
-    );
+    let confirmation_email =
+        confirmation_email_builder(new_subscriber.email.as_ref(), base_url, token);
 
     email_client
         .send_email(
             &new_subscriber.email,
             "Welcome",
-            &html_content,
-            &text_content,
+            &confirmation_email.html_body.unwrap(),
+            &confirmation_email.text_body.unwrap(),
         )
         .await
+}
+
+pub fn confirmation_email_builder(
+    recipient: &str,
+    base_url: &str,
+    token: &str,
+) -> SendEmailRequestOwned {
+    let confirmation_link = format!("{}/subscriptions/confirm?token={}", base_url, token);
+    let html_content = format!(
+        r#"Welcome to our newsletter!<br />
+  Click <a href="{confirmation_link}">here</a> to confirm your subscription."#,
+    );
+    let text_content = format!(
+        r#"Welcome to our newsletter!
+  Visit {confirmation_link} to confirm your subscription."#,
+    );
+
+    SendEmailRequestOwned {
+        from: None,
+        to: Some(recipient.to_owned()),
+        subject: Some("Welcome".to_owned()),
+        html_body: Some(html_content),
+        text_body: Some(text_content),
+    }
+}
+
+///  **This is used only for testing.**
+/// This is a owned version of `SendEmailRequest`, so you can deserialize it from the response conveniently.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SendEmailRequestOwned {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub subject: Option<String>,
+    pub text_body: Option<String>,
+    pub html_body: Option<String>,
 }
 
 #[tracing::instrument(

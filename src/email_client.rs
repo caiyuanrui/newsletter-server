@@ -61,7 +61,7 @@ impl EmailClient {
 
     /// # Errors
     ///
-    /// This function will timeout if 10 seconds has elasped.
+    /// This function will get timeout if 10 seconds has elasped.
     #[instrument(name = "Send email with Postmark ", skip(self), fields(subscriber_email = %recipient))]
     pub async fn send_email(
         &self,
@@ -105,7 +105,7 @@ impl EmailClient {
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct SendEmailRequest<'a> {
+pub struct SendEmailRequest<'a> {
     from: &'a str,
     to: &'a str,
     subject: &'a str,
