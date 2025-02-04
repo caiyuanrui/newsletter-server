@@ -1,15 +1,49 @@
 use fake::Fake;
 use serde::Serialize;
 use sqlx::MySqlPool;
+use uuid::Uuid;
 use wiremock::{matchers, Mock, ResponseTemplate};
 
 use crate::helpers::{assert_is_redirect_to, spawn_test_app, ConfirmationLink, TestApp};
 
 #[sqlx::test]
+async fn newsletter_creation_is_idempotent(pool: MySqlPool) {
+    let app = spawn_test_app(pool).await;
+    create_confirmed_subscriber(&app).await;
+    app.test_user.login(&app).await;
+
+    Mock::given(matchers::path("/email"))
+        .and(matchers::method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&app.email_server)
+        .await;
+
+    // Submit newsletter form
+    let newsletter_request_body = serde_json::json!({
+      "title": "Newsletter Title",
+      "text_content": "Newsletter body as plain text",
+      "html_content": "<p>Newsletter body as HTML</p>",
+      "idempotency_key": Uuid::new_v4()
+    });
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
+    assert_is_redirect_to(&response, "/admin/newsletters");
+
+    let html_page = app.get_publish_newsletters_html().await;
+    assert!(html_page.contains("<p><i>The newsletter issue has been published!</i></p>"));
+
+    // Submit newsletter form again!
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
+    assert_is_redirect_to(&response, "/admin/newsletters");
+    let html_page = app.get_publish_newsletters_html().await;
+    assert!(html_page.contains("<p><i>The newsletter issue has been published!</i></p>"));
+}
+
+#[sqlx::test]
 async fn you_must_be_logged_in_to_see_the_send_newsletters_form(pool: MySqlPool) {
     let app = spawn_test_app(pool).await;
 
-    let response = app.get_newsletters().await;
+    let response = app.get_publish_newsletters().await;
     assert_is_redirect_to(&response, "/login");
 }
 
@@ -17,14 +51,12 @@ async fn you_must_be_logged_in_to_see_the_send_newsletters_form(pool: MySqlPool)
 async fn you_must_be_logged_in_to_send_newsletters(pool: MySqlPool) {
     let app = spawn_test_app(pool).await;
 
-    let newsletter_request_body = serde_urlencoded::to_string([
-        ("title", "Newsletter Title"),
-        ("html_content", "<p>Newsletter body as html</p>"),
-        ("text_content", "Newsletter body as plain text"),
-    ])
-    .unwrap();
-
-    let response = app.post_newsletters(newsletter_request_body).await;
+    let newsletter_request_body = serde_json::json!({
+      "title": "Newsletter Title",
+      "html_content": "<p>Newsletter body as html</p>",
+      "text_content": "Newsletter body as plain text",
+    });
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/login");
 }
 
@@ -45,14 +77,12 @@ async fn newsletters_are_not_delivered_to_unconfirmed_subscribers(pool: MySqlPoo
     }))
     .await;
 
-    let newsletter_request_body = serde_urlencoded::to_string([
-        ("title", "Newsletter Title"),
-        ("html_content", "<p>Newsletter body as html</p>"),
-        ("text_content", "Newsletter body as plain text"),
-    ])
-    .unwrap();
-
-    let response = app.post_newsletters(newsletter_request_body).await;
+    let newsletter_request_body = serde_json::json!({
+      "title": "Newsletter Title",
+      "html_content": "<p>Newsletter body as html</p>",
+      "text_content": "Newsletter body as plain text",
+    });
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
 
     assert_is_redirect_to(&response, "/admin/newsletters");
 }
@@ -75,14 +105,12 @@ async fn newsletters_are_delivered_to_confirmed_subscribers(pool: MySqlPool) {
     }))
     .await;
 
-    let newsletter_request_body = serde_urlencoded::to_string([
-        ("title", "Newsletter Title"),
-        ("html_content", "<p>Newsletter body as html</p>"),
-        ("text_content", "Newsletter body as plain text"),
-    ])
-    .unwrap();
-
-    let response = app.post_newsletters(newsletter_request_body).await;
+    let newsletter_request_body = serde_json::json!({
+      "title": "Newsletter Title",
+      "html_content": "<p>Newsletter body as html</p>",
+      "text_content": "Newsletter body as plain text",
+    });
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
 }
 
@@ -91,15 +119,14 @@ async fn newsletters_returns_422_for_invalid_data(pool: MySqlPool) {
     let app = spawn_test_app(pool).await;
     let test_cases = [
         (
-            serde_urlencoded::to_string([
-                ("html_content", "<p>Newsletter body as html</p>"),
-                ("text_content", "Newsletter body as plain text"),
-            ])
-            .unwrap(),
+            serde_json::json!({
+            "html_content": "<p>Newsletter body as html</p>",
+            "text_content": "Newsletter body as plain text",
+            }),
             "missing title",
         ),
         (
-            serde_urlencoded::to_string([("title", "Newsletter Title")]).unwrap(),
+            serde_json::json!({"title": "Newsletter Title"}),
             "missing content",
         ),
     ];
@@ -111,7 +138,7 @@ async fn newsletters_returns_422_for_invalid_data(pool: MySqlPool) {
     .await;
 
     for (invalid_body, error_message) in test_cases {
-        let response = app.post_newsletters(invalid_body).await;
+        let response = app.post_publish_newsletters(&invalid_body).await;
 
         assert_eq!(
             422,
@@ -161,12 +188,11 @@ async fn returns_422_if_published_newsletter_form_cannot_be_parsed(pool: MySqlPo
     }))
     .await;
 
-    let form = NewsletterFormBuilder::new()
-        .with_title("Newsletter title")
-        .with_html_content("<p>Newsletter body as HTML</p>")
-        .to_string();
-
-    let response = app.post_newsletters(form).await;
+    let newsletter_request_body = serde_json::json!({
+      "title": "Newsletter Title",
+      "html_content": "<p>Newsletter body as html</p>",
+    });
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_eq!(422, response.status().as_u16());
 }
 
@@ -180,16 +206,15 @@ async fn succeed_to_publish_a_newsletter_form(pool: MySqlPool) {
     }))
     .await;
 
-    let form = NewsletterFormBuilder::new()
-        .with_title("Newsletter title")
-        .with_html_content("<p>Newsletter body as HTML</p>")
-        .with_text_content("Newsletter body as plain text")
-        .to_string();
-
-    let response = app.post_newsletters(form).await;
+    let newsletter_request_body = serde_json::json!({
+      "title": "Newsletter Title",
+      "html_content": "<p>Newsletter body as html</p>",
+      "text_content": "Newsletter body as plain text",
+    });
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
 
-    let html_page = app.get_newsletters_html().await;
+    let html_page = app.get_publish_newsletters_html().await;
     assert!(html_page.contains("<p><i>The newsletter issue has been published!</i></p>"))
 }
 
@@ -270,15 +295,16 @@ async fn send_a_newsletter_to_all_subscribers(app: &TestApp) -> u64 {
         .expect(total_subscriber_nums)
         .mount_as_scoped(&app.email_server)
         .await;
-    let body = NewsletterFormBuilder::new()
-        .with_title("title")
-        .with_html_content("html_content")
-        .with_text_content("text_content");
-    let response = app.post_newsletters(body.to_string()).await;
+    let newsletter_request_body = serde_json::json!({
+      "title": "Newsletter Title",
+      "html_content": "<p>Newsletter body as html</p>",
+      "text_content": "Newsletter body as plain text",
+    });
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
 
     assert_is_redirect_to(&response, "/admin/newsletters");
 
-    let html_page = app.get_newsletters_html().await;
+    let html_page = app.get_publish_newsletters_html().await;
     assert!(html_page.contains("The newsletter issue has been published!"));
 
     total_subscriber_nums
