@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO subscription_tokens (subscription_token, subscriber_id)  VALUES (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6609624df3269c8f8e332fcd6974f53be341af1d8fde9be7fcb61ecd2f0e812c"
+}

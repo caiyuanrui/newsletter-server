@@ -1,0 +1,24 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT subscriber_id FROM subscription_tokens WHERE subscription_token = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "subscriber_id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | MULTIPLE_KEY | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 16
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "eae05d4a796aac6cb5a2567ca488609c3f52ae9fc58b49a2e90710895722dc80"
+}

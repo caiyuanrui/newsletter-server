@@ -8,7 +8,7 @@ use tracing::instrument;
 use crate::{
     domain::{SubscriberEmail, UserId},
     email_client::EmailClient,
-    idempotency::{get_saved_response, save_response, IdempotencyKey},
+    idempotency::{save_response, try_processing, IdempotencyKey, NextAction},
     utils::{e400, e500, see_other, Data},
 };
 
@@ -29,18 +29,21 @@ pub async fn publish_newsletter(
     } = form;
     let idempotency_key: IdempotencyKey = idempotency_key.try_into().map_err(e400)?;
     // Return early if we have a saved response in the database
-    if let Some(saved_response) = get_saved_response(&pool, &idempotency_key, user_id)
+    let txn = match try_processing(&pool, &idempotency_key, user_id)
         .await
         .map_err(e500)?
     {
-        // This is weird to resend messages by checking status code...
-        // fix it later
-        if saved_response.status() == StatusCode::SEE_OTHER {
-            messages.success("The newsletter issue has been published!");
+        NextAction::StartProcessing(txn) => txn,
+        NextAction::ReturnSavedResponse(saved_response) => {
+            // This is weird to resend messages by checking status code...
+            // fix it later
+            if saved_response.status() == StatusCode::SEE_OTHER {
+                send_success_message(messages);
+            }
+            tracing::debug!("saved_http_response: {:?}", saved_response);
+            return Ok(saved_response);
         }
-        tracing::debug!("saved_http_response: {:?}", saved_response);
-        return Ok(saved_response);
-    }
+    };
 
     let subscribers = get_confirmed_subscribers(&pool).await.map_err(e500)?;
 
@@ -61,12 +64,16 @@ pub async fn publish_newsletter(
     }
 
     let response = see_other("/admin/newsletters");
-    let response = save_response(&pool, &idempotency_key, user_id, response)
+    let response = save_response(txn, &idempotency_key, user_id, response)
         .await
         .map_err(e500)?;
-    messages.success("The newsletter issue has been published!");
+    send_success_message(messages);
 
     Ok(response)
+}
+
+fn send_success_message(messages: Messages) {
+    messages.success("The newsletter issue has been published!");
 }
 
 /// Get all confirmed subscribers. Filter out those subscribers with invalid email address.

@@ -1,19 +1,17 @@
-use std::ops::{Deref, DerefMut};
-
 use anyhow::Context;
 use axum::{body::to_bytes, response::Response};
 use hyper::StatusCode;
-use serde::{Deserialize, Serialize};
-use sqlx::MySqlPool;
+use sqlx::{MySqlPool, MySqlTransaction};
 use tracing::instrument;
 
 use crate::domain::UserId;
 
-use super::IdempotencyKey;
+use super::{HeaderPairRecord, Headers, IdempotencyKey};
 
+/// Commit transaction if successfully update the idempotency table
 #[instrument(name = "Save response to database")]
 pub async fn save_response(
-    pool: &MySqlPool,
+    mut txn: MySqlTransaction<'static>,
     idempotency_key: &IdempotencyKey,
     user_id: UserId,
     response: Response,
@@ -34,25 +32,25 @@ pub async fn save_response(
 
     sqlx::query!(
         r#"
-      INSERT INTO idempotency (
-        user_id,
-        idempotency_key,
-        response_status_code,
-        response_headers,
-        response_body,
-        created_at
-      )
-      VALUES (?, ?, ?, ?, ?, now())
+      UPDATE idempotency
+      SET
+      response_status_code = ?,
+      response_headers = ?,
+      response_body = ?
+      WHERE
+      user_id = ? AND
+      idempotency_key = ?
       "#,
-        user_id,
-        idempotency_key.as_ref(),
         status_code,
         headers_bytes,
         bytes.as_ref(),
+        user_id,
+        idempotency_key.as_ref(),
     )
-    .execute(pool)
+    .execute(&mut *txn)
     .await
     .context("Failed to execute query")?;
+    txn.commit().await?;
 
     let response = Response::from_parts(parts, bytes.into());
     Ok(response)
@@ -64,12 +62,12 @@ pub async fn get_saved_response(
     idempotency_key: &IdempotencyKey,
     user_id: UserId,
 ) -> Result<Option<Response>, anyhow::Error> {
-    let saved_response = sqlx::query!(
+    let saved_response = sqlx::query_unchecked!(
         r#"
       SELECT
-        response_status_code,
-        response_headers,
-        response_body
+        response_status_code as "response_status_code!",
+        response_headers as "response_headers!",
+        response_body as "response_body!"
       FROM idempotency
       WHERE
         user_id = ? AND
@@ -94,129 +92,43 @@ pub async fn get_saved_response(
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct HeaderPairRecord {
-    pub key: String,
-    pub value: Vec<u8>,
+pub enum NextAction {
+    StartProcessing(sqlx::MySqlTransaction<'static>),
+    ReturnSavedResponse(Response),
 }
 
-impl<T, U> From<(T, U)> for HeaderPairRecord
-where
-    T: Into<String>,
-    U: Into<Vec<u8>>,
-{
-    fn from(value: (T, U)) -> Self {
-        Self {
-            key: value.0.into(),
-            value: value.1.into(),
-        }
-    }
-}
+/// The transaction starts here.
+/// If you're using Postgres, make sure that the isolation level is read committed,
+/// otherwise, the serialization will fail.
+pub async fn try_processing(
+    pool: &MySqlPool,
+    idempotency_key: &IdempotencyKey,
+    user_id: UserId,
+) -> Result<NextAction, anyhow::Error> {
+    let mut txn = pool.begin().await?;
 
-#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Headers(pub Vec<HeaderPairRecord>);
+    let n_inserted_rows = sqlx::query!(
+        r#"
+      INSERT IGNORE INTO idempotency(
+      user_id,
+      idempotency_key,
+      created_at
+      )
+      VALUES (?, ?, now())
+      "#,
+        user_id,
+        idempotency_key.as_ref()
+    )
+    .execute(&mut *txn)
+    .await?
+    .rows_affected();
 
-impl Headers {
-    pub fn new<T, U>(inner: T) -> Self
-    where
-        T: Into<Vec<U>>,
-        U: Into<HeaderPairRecord>,
-    {
-        Self(inner.into().into_iter().map(Into::into).collect())
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.try_into().expect("Failed to serialize Headers")
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        bytes.try_into().expect("Failed to deserialize Headers")
-    }
-}
-
-impl TryFrom<&[u8]> for Headers {
-    type Error = bincode::Error;
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        bincode::deserialize(bytes)
-    }
-}
-
-impl TryFrom<&Headers> for Vec<u8> {
-    type Error = bincode::Error;
-    fn try_from(value: &Headers) -> Result<Self, Self::Error> {
-        bincode::serialize(value)
-    }
-}
-
-impl TryFrom<Headers> for Vec<u8> {
-    type Error = bincode::Error;
-    fn try_from(value: Headers) -> Result<Self, Self::Error> {
-        bincode::serialize(&value)
-    }
-}
-
-impl From<&axum::http::HeaderMap> for Headers {
-    fn from(value: &axum::http::HeaderMap) -> Self {
-        value
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_bytes()).into())
-            .collect()
-    }
-}
-
-impl From<axum::http::HeaderMap> for Headers {
-    fn from(value: axum::http::HeaderMap) -> Self {
-        value
-            .into_iter()
-            .filter_map(|(name, value)| {
-                name.map(|name| HeaderPairRecord {
-                    key: name.to_string(),
-                    value: value.as_bytes().to_vec(),
-                })
-            })
-            .collect()
-    }
-}
-
-impl Deref for Headers {
-    type Target = Vec<HeaderPairRecord>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Headers {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl FromIterator<HeaderPairRecord> for Headers {
-    fn from_iter<T: IntoIterator<Item = HeaderPairRecord>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
-    }
-}
-
-impl IntoIterator for Headers {
-    type Item = HeaderPairRecord;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn serde_headers_as_bytes() {
-        let raw_headers = Headers::new([
-            ("Content-Type", "application/json"),
-            ("Content_length", "0"),
-        ]);
-        let bytes = raw_headers.to_bytes();
-        let new_headers = Headers::from_bytes(&bytes);
-        assert_eq!(raw_headers, new_headers);
+    if n_inserted_rows > 0 {
+        Ok(NextAction::StartProcessing(txn))
+    } else {
+        let saved_response = get_saved_response(pool, idempotency_key, user_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("We expected a saved response, we didn't find it"))?;
+        Ok(NextAction::ReturnSavedResponse(saved_response))
     }
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n      INSERT INTO idempotency (\n        user_id,\n        idempotency_key,\n        response_status_code,\n        response_headers,\n        response_body,\n        created_at\n      )\n      VALUES (?, ?, ?, ?, ?, now())\n      ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "a4a880cdf537c2370e195041d977357ee1fe26237a98d16a8fe6cad008e4279c"
+}
