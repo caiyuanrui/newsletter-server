@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use axum::{
     extract::{rejection::QueryRejection, Query, State},
     response::IntoResponse,
@@ -62,7 +60,7 @@ async fn get_subscriber_id_with_token(
     })?;
 
     Ok(result.map(|r| {
-        UserId::from_str(&r.subscriber_id).expect("Failed to parse subscriber_id into uuid")
+        UserId::from_slice(&r.subscriber_id).expect("Failed to parse subscriber_id into uuid")
     }))
 }
 
@@ -70,7 +68,7 @@ async fn get_subscriber_id_with_token(
 async fn confirm_subscriber(pool: &MySqlPool, id: UserId) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"UPDATE subscriptions SET status = 'confirmed' WHERE id = ?"#,
-        id.to_string(),
+        id,
     )
     .execute(pool)
     .await

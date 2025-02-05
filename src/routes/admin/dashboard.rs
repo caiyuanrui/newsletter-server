@@ -50,7 +50,7 @@ pub async fn get_username(user_id: UserId, pool: &MySqlPool) -> Result<String, a
       FROM users
       WHERE user_id = ?
       "#,
-        user_id.to_string()
+        user_id
     )
     .fetch_one(pool)
     .await

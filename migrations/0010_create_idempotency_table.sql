@@ -1,6 +1,6 @@
 -- Add migration script here
 CREATE TABLE idempotency (
-  user_id CHAR(36) NOT NULL,
+  user_id BINARY(16) NOT NULL, -- UUID
   idempotency_key VARCHAR(256) NOT NULL,
   response_status_code SMALLINT NOT NULL,
   response_headers BLOB NOT NULL,

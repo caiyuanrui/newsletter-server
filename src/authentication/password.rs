@@ -8,8 +8,6 @@ use serde::Deserialize;
 use sqlx::MySqlPool;
 use tracing::instrument;
 
-use std::str::FromStr;
-
 use crate::{domain::UserId, telementry::spawn_blocking_with_tracing};
 
 #[derive(thiserror::Error, Debug)]
@@ -81,7 +79,8 @@ async fn get_stored_credentials(
     .await
     .context("Failed to perform a query to retrieve stored credentials")?
     .map(|row| {
-        let subscriber_id = UserId::from_str(&row.user_id).context("Failed to parse user id")?;
+        let subscriber_id = UserId::from_slice(row.user_id.as_ref())
+            .context("Failed to parse user_id into uuid")?;
         let password_hash = SecretString::new(row.password_hash.into_boxed_str());
         Ok((subscriber_id, password_hash))
     })
@@ -104,7 +103,7 @@ pub async fn change_password(
       WHERE user_id = ?
       "#,
         password_hash.expose_secret(),
-        user_id.to_string()
+        user_id
     )
     .execute(pool)
     .await

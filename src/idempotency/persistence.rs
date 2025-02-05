@@ -44,7 +44,7 @@ pub async fn save_response(
       )
       VALUES (?, ?, ?, ?, ?, now())
       "#,
-        user_id.to_string(),
+        user_id,
         idempotency_key.as_ref(),
         status_code,
         headers_bytes,
@@ -75,7 +75,7 @@ pub async fn get_saved_response(
         user_id = ? AND
         idempotency_key = ?
       "#,
-        user_id.to_string(),
+        user_id,
         idempotency_key.as_ref()
     )
     .fetch_optional(pool)

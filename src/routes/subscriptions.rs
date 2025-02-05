@@ -157,7 +157,7 @@ pub async fn insert_subscriber(
 INSERT INTO subscriptions (id, email, name, subscribed_at, status)
 VALUES (?, ?, ?, ?, 'pending_confirmation')
 "#,
-        subscriber_id.to_string(),
+        subscriber_id,
         new_subscriber.email.as_ref(),
         new_subscriber.name.as_ref(),
         chrono::Utc::now()
@@ -180,7 +180,7 @@ pub async fn store_token(
     sqlx::query!(
         r#"INSERT INTO subscription_tokens (subscription_token, subscriber_id)  VALUES (?, ?)"#,
         subscription_token,
-        subscriber_id.to_string()
+        subscriber_id
     )
     .execute(txn.as_mut())
     .await

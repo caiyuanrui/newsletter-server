@@ -39,7 +39,7 @@ pub async fn login(
 
     match validate_credentials(credentials, &db_pool).await {
         Ok(user_id) => {
-            tracing::Span::current().record("user_id", tracing::field::display(&user_id));
+            tracing::Span::current().record("user_id", tracing::field::debug(&user_id));
 
             if let Err(e) = session.renew().await {
                 return Err(login_redirect(anyhow::Error::from(e), messages));
