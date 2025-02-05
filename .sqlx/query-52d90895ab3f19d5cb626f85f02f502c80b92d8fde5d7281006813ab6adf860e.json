@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE subscriptions SET status = 'confirmed' WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "52d90895ab3f19d5cb626f85f02f502c80b92d8fde5d7281006813ab6adf860e"
+}

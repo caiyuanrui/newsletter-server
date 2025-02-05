@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\nINSERT INTO subscriptions (id, email, name, subscribed_at, status)\nVALUES (?, ?, ?, ?, 'pending_confirmation')\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "cabef322f9431ea37ae598b7e1bb23efd9695e07a10b4c3f11db7f838272b506"
+}

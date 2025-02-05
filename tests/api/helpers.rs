@@ -259,6 +259,7 @@ pub async fn spawn_test_app(pool: MySqlPool) -> TestApp {
     }
 }
 
+#[track_caller]
 pub fn assert_is_redirect_to(response: &reqwest::Response, location: &str) {
     assert_eq!(StatusCode::SEE_OTHER, response.status());
     assert_eq!(

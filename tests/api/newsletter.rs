@@ -20,12 +20,13 @@ async fn newsletter_creation_is_idempotent(pool: MySqlPool) {
         .await;
 
     // Submit newsletter form
-    let newsletter_request_body = serde_json::json!({
-      "title": "Newsletter Title",
-      "text_content": "Newsletter body as plain text",
-      "html_content": "<p>Newsletter body as HTML</p>",
-      "idempotency_key": Uuid::new_v4()
-    });
+    let newsletter_request_body = NewsletterFormBuilder::new()
+        .with_title("Newsletter Title")
+        .with_text_content("Newsletter body as plain text")
+        .with_html_content("<p>Newsletter body as HTML</p>")
+        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
+        .into_json()
+        .unwrap();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
 
@@ -51,11 +52,13 @@ async fn you_must_be_logged_in_to_see_the_send_newsletters_form(pool: MySqlPool)
 async fn you_must_be_logged_in_to_send_newsletters(pool: MySqlPool) {
     let app = spawn_test_app(pool).await;
 
-    let newsletter_request_body = serde_json::json!({
-      "title": "Newsletter Title",
-      "html_content": "<p>Newsletter body as html</p>",
-      "text_content": "Newsletter body as plain text",
-    });
+    let newsletter_request_body = NewsletterFormBuilder::new()
+        .with_title("Newsletter Title")
+        .with_text_content("Newsletter body as plain text")
+        .with_html_content("<p>Newsletter body as HTML</p>")
+        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
+        .into_json()
+        .unwrap();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/login");
 }
@@ -77,11 +80,13 @@ async fn newsletters_are_not_delivered_to_unconfirmed_subscribers(pool: MySqlPoo
     }))
     .await;
 
-    let newsletter_request_body = serde_json::json!({
-      "title": "Newsletter Title",
-      "html_content": "<p>Newsletter body as html</p>",
-      "text_content": "Newsletter body as plain text",
-    });
+    let newsletter_request_body = NewsletterFormBuilder::new()
+        .with_title("Newsletter Title")
+        .with_text_content("Newsletter body as plain text")
+        .with_html_content("<p>Newsletter body as HTML</p>")
+        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
+        .into_json()
+        .unwrap();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
 
     assert_is_redirect_to(&response, "/admin/newsletters");
@@ -105,11 +110,13 @@ async fn newsletters_are_delivered_to_confirmed_subscribers(pool: MySqlPool) {
     }))
     .await;
 
-    let newsletter_request_body = serde_json::json!({
-      "title": "Newsletter Title",
-      "html_content": "<p>Newsletter body as html</p>",
-      "text_content": "Newsletter body as plain text",
-    });
+    let newsletter_request_body = NewsletterFormBuilder::new()
+        .with_title("Newsletter Title")
+        .with_text_content("Newsletter body as plain text")
+        .with_html_content("<p>Newsletter body as HTML</p>")
+        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
+        .into_json()
+        .unwrap();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
 }
@@ -122,11 +129,15 @@ async fn newsletters_returns_422_for_invalid_data(pool: MySqlPool) {
             serde_json::json!({
             "html_content": "<p>Newsletter body as html</p>",
             "text_content": "Newsletter body as plain text",
+            "idempotency_key": Uuid::new_v4().to_string()
             }),
             "missing title",
         ),
         (
-            serde_json::json!({"title": "Newsletter Title"}),
+            serde_json::json!({
+              "title": "Newsletter Title",
+              "idempotency_key": Uuid::new_v4().to_string()
+            }),
             "missing content",
         ),
     ];
@@ -170,6 +181,7 @@ async fn requests_missing_authorization_are_rejected(pool: MySqlPool) {
                 .with_title("Newsletter title")
                 .with_html_content("<p>Newsletter body as HTML</p>")
                 .with_text_content("Newsletter body as plain text")
+                .with_idempotency_key(Uuid::new_v4().to_string().as_str())
                 .to_string(),
         )
         .send()
@@ -191,6 +203,7 @@ async fn returns_422_if_published_newsletter_form_cannot_be_parsed(pool: MySqlPo
     let newsletter_request_body = serde_json::json!({
       "title": "Newsletter Title",
       "html_content": "<p>Newsletter body as html</p>",
+      "invalid_field": "???"
     });
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_eq!(422, response.status().as_u16());
@@ -210,6 +223,7 @@ async fn succeed_to_publish_a_newsletter_form(pool: MySqlPool) {
       "title": "Newsletter Title",
       "html_content": "<p>Newsletter body as html</p>",
       "text_content": "Newsletter body as plain text",
+      "idempotency_key": Uuid::new_v4().to_string()
     });
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
@@ -299,6 +313,7 @@ async fn send_a_newsletter_to_all_subscribers(app: &TestApp) -> u64 {
       "title": "Newsletter Title",
       "html_content": "<p>Newsletter body as html</p>",
       "text_content": "Newsletter body as plain text",
+      "idempotency_key": Uuid::new_v4().to_string()
     });
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
 
@@ -315,9 +330,14 @@ struct NewsletterFormBuilder<S>
 where
     S: Serialize,
 {
+    #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<S>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     html_content: Option<S>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     text_content: Option<S>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    idempotency_key: Option<S>,
 }
 
 impl<S> NewsletterFormBuilder<S>
@@ -329,6 +349,7 @@ where
             title: None,
             html_content: None,
             text_content: None,
+            idempotency_key: None,
         }
     }
 
@@ -348,6 +369,16 @@ where
         let mut this = self;
         this.text_content = Some(text_content);
         this
+    }
+
+    fn with_idempotency_key(self, idempotency_key: S) -> Self {
+        let mut this = self;
+        this.idempotency_key = Some(idempotency_key);
+        this
+    }
+
+    fn into_json(self) -> Result<serde_json::Value, serde_json::Error> {
+        serde_json::to_value(self)
     }
 }
 

@@ -1,0 +1,44 @@
+{
+  "db_name": "MySQL",
+  "query": "\n      SELECT\n        response_status_code,\n        response_headers,\n        response_body\n      FROM idempotency\n      WHERE\n        user_id = ? AND\n        idempotency_key = ?\n      ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "response_status_code",
+        "type_info": {
+          "type": "Short",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "max_size": 6
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "response_headers",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 65535
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "response_body",
+        "type_info": {
+          "type": "Blob",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "max_size": 4294967295
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e0cd4ddef459023636a9705c3b92899f49499d87ca9351db833cc6bc27d1633b"
+}

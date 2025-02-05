@@ -1,6 +1,7 @@
 use axum::response::{Html, IntoResponse};
 use axum_messages::Messages;
 use hyper::StatusCode;
+use uuid::Uuid;
 
 use std::fmt::Write;
 
@@ -9,6 +10,7 @@ pub async fn publish_newsletter_form(messages: Messages) -> impl IntoResponse {
         _ = writeln!(acc, "<p><i>{}</i></p>", item.message);
         acc
     });
+    let idempotency_key = Uuid::new_v4();
 
     (
         StatusCode::OK,
@@ -21,7 +23,7 @@ pub async fn publish_newsletter_form(messages: Messages) -> impl IntoResponse {
 </head>
 <body>
   {msg}
-  <form action="/admin/newsletters" method="post">
+  <form action="/admin/newsletters" method="post" value="{idempotency_key}">
     <label>Newsletter Title
     <br />
       <textarea name="title" rows="10" cols="50"></textarea>
@@ -37,7 +39,7 @@ pub async fn publish_newsletter_form(messages: Messages) -> impl IntoResponse {
       <textarea name="text_content" rows="20" cols="100"></textarea>
     </label>
     <br />
-    <button type="submit">Send</button>
+    <button type="submit">Publish</button>
   </form>
 </body>
 </html>"#,

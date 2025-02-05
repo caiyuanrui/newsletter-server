@@ -1,35 +1,54 @@
-use axum::{extract::State, response::Response, Form};
+use axum::{extract::State, response::Response, Extension, Form};
 use axum_messages::Messages;
+use hyper::StatusCode;
 use serde::Deserialize;
 use sqlx::MySqlPool;
 use tracing::instrument;
 
 use crate::{
-    domain::SubscriberEmail,
+    domain::{SubscriberEmail, UserId},
     email_client::EmailClient,
-    utils::{e500, see_other, Data},
+    idempotency::{get_saved_response, save_response, IdempotencyKey},
+    utils::{e400, e500, see_other, Data},
 };
 
 /// Fetch all confirmed subscribers and send newsletters to them
-#[instrument(name = "Publish a newsletter issue", skip_all)]
+#[instrument(name = "Publish a newsletter issue", skip(pool, email_client))]
 pub async fn publish_newsletter(
     messages: Messages,
-    State(db_pool): State<MySqlPool>,
+    State(pool): State<MySqlPool>,
     State(email_client): State<Data<EmailClient>>,
+    Extension(user_id): Extension<UserId>,
     Form(form): Form<FormData>,
 ) -> Result<Response, Response> {
-    let subscribers = get_confirmed_subscribers(&db_pool).await.map_err(e500)?;
+    let FormData {
+        title,
+        html_content,
+        text_content,
+        idempotency_key,
+    } = form;
+    let idempotency_key: IdempotencyKey = idempotency_key.try_into().map_err(e400)?;
+    // Return early if we have a saved response in the database
+    if let Some(saved_response) = get_saved_response(&pool, &idempotency_key, user_id)
+        .await
+        .map_err(e500)?
+    {
+        // This is weird to resend messages by checking status code...
+        // fix it later
+        if saved_response.status() == StatusCode::SEE_OTHER {
+            messages.success("The newsletter issue has been published!");
+        }
+        tracing::debug!("saved_http_response: {:?}", saved_response);
+        return Ok(saved_response);
+    }
+
+    let subscribers = get_confirmed_subscribers(&pool).await.map_err(e500)?;
 
     for subscriber in subscribers {
         match subscriber {
             Ok(subscriber) => {
                 email_client
-                    .send_email(
-                        &subscriber.email,
-                        &form.title,
-                        &form.html_content,
-                        &form.text_content,
-                    )
+                    .send_email(&subscriber.email, &title, &html_content, &text_content)
                     .await
                     .map_err(e500)?;
             }
@@ -41,8 +60,13 @@ pub async fn publish_newsletter(
         }
     }
 
+    let response = see_other("/admin/newsletters");
+    let response = save_response(&pool, &idempotency_key, user_id, response)
+        .await
+        .map_err(e500)?;
     messages.success("The newsletter issue has been published!");
-    Ok(see_other("/admin/newsletters"))
+
+    Ok(response)
 }
 
 /// Get all confirmed subscribers. Filter out those subscribers with invalid email address.
@@ -80,4 +104,5 @@ pub struct FormData {
     title: String,
     html_content: String,
     text_content: String,
+    idempotency_key: String,
 }
