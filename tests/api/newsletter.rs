@@ -2,11 +2,49 @@ use fake::Fake;
 use serde::Serialize;
 use sqlx::MySqlPool;
 use uuid::Uuid;
-use wiremock::{matchers, Mock, ResponseTemplate};
+use wiremock::{matchers, Mock, MockBuilder, ResponseTemplate};
 
 use std::time::Duration;
 
 use crate::helpers::{assert_is_redirect_to, spawn_test_app, ConfirmationLink, TestApp};
+
+#[sqlx::test]
+async fn transient_errors_do_not_cause_duplicate_deliveries_on_retries(pool: MySqlPool) {
+    let app = spawn_test_app(pool).await;
+    let newsletter_request_body = newsletter_request_body();
+    // Two subscribers
+    create_confirmed_subscriber(&app).await;
+    create_confirmed_subscriber(&app).await;
+    app.test_user.login(&app).await;
+
+    // Email delivery fails for the second subscriber
+    when_sending_an_email()
+        .respond_with(ResponseTemplate::new(200))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&app.email_server)
+        .await;
+    when_sending_an_email()
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&app.email_server)
+        .await;
+
+    // One of the subscriber delivery failed, the idempotency operation will roll back
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
+    assert_eq!(500, response.status().as_u16());
+
+    // Retry for submitting the form
+    when_sending_an_email()
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .named("Delivery retry")
+        .mount(&app.email_server)
+        .await;
+    let response = app.post_publish_newsletters(&newsletter_request_body).await;
+    assert_eq!(303, response.status().as_u16());
+}
 
 #[sqlx::test]
 async fn concurrent_form_submission_is_handled_gracefully(pool: MySqlPool) {
@@ -302,8 +340,7 @@ async fn create_10_confirmed_subscribers_and_send_a_newsletter_to_them(pool: MyS
 async fn create_unconfirmed_subscriber(test_app: &TestApp) -> ConfirmationLink {
     let name: String = fake::faker::name::en::Name().fake();
     let email: String = fake::faker::internet::en::SafeEmail().fake();
-    let body =
-        serde_urlencoded::to_string([("name", name.as_str()), ("email", email.as_str())]).unwrap();
+    let body = serde_urlencoded::to_string([("name", name), ("email", email)]).unwrap();
     let _mock_guard = Mock::given(matchers::path("/email"))
         .and(matchers::method("POST"))
         .respond_with(ResponseTemplate::new(200))
@@ -425,4 +462,19 @@ where
         let ser = serde_urlencoded::to_string(self).unwrap();
         ser.fmt(f)
     }
+}
+
+fn newsletter_request_body() -> serde_json::Value {
+    NewsletterFormBuilder::new()
+        .with_title("Newsletter Title")
+        .with_text_content("Newsletter body as plain text")
+        .with_html_content("<p>Newsletter body as HTML</p>")
+        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
+        .into_json()
+        .unwrap()
+}
+
+/// Short-hand for a common mocking setup.
+fn when_sending_an_email() -> MockBuilder {
+    Mock::given(matchers::path("/email")).and(matchers::method("POST"))
 }
