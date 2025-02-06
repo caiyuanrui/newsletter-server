@@ -1,7 +1,6 @@
 use anyhow::Context;
 use axum::{extract::State, response::Response, Extension, Form};
 use axum_messages::Messages;
-use hyper::StatusCode;
 use serde::Deserialize;
 use sqlx::{MySqlPool, MySqlTransaction};
 use tracing::instrument;
@@ -36,12 +35,7 @@ pub async fn publish_newsletter(
     {
         NextAction::StartProcessing(txn) => txn,
         NextAction::ReturnSavedResponse(saved_response) => {
-            // This is weird to resend messages by checking status code...
-            // fix it later
-            if saved_response.status() == StatusCode::SEE_OTHER {
-                send_success_message(messages);
-            }
-            tracing::debug!("saved_http_response: {:?}", saved_response);
+            send_success_message(messages);
             return Ok(saved_response);
         }
     };
@@ -60,7 +54,6 @@ pub async fn publish_newsletter(
         .await
         .map_err(e500)?;
     send_success_message(messages);
-
     Ok(response)
 }
 

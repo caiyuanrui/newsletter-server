@@ -12,15 +12,7 @@ use crate::{
 
 pub async fn run_worker_loop_until_stopped(configuration: Settings) -> Result<(), anyhow::Error> {
     let connection_pool = get_connection_pool(&configuration.database);
-
-    let send_email = configuration
-        .email_client
-        .sender()
-        .expect("Invalid sender email address");
-    let timeout = configuration.email_client.timeout();
-    let url = configuration.email_client.base_url;
-    let authorization_token = configuration.email_client.authorization_token;
-    let email_client = EmailClient::new(url, send_email, authorization_token, timeout);
+    let email_client = configuration.email_client.client();
     worker_loop(connection_pool, email_client).await
 }
 
@@ -37,25 +29,27 @@ async fn worker_loop(pool: MySqlPool, email_client: EmailClient) -> Result<(), a
     }
 }
 
-enum ExecutionOutcome {
+#[derive(Debug)]
+pub enum ExecutionOutcome {
     TaskCompleted,
     EmptyQueue,
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ExecutionError {
+pub enum ExecutionError {
     #[error("")]
     TransientError(#[from] sqlx::Error),
     #[error("")]
     FatalError(#[from] anyhow::Error),
 }
 
+/// This function is marked `pub` just for testing.
 /// # Errors
 /// There are two kinds of errore:
 /// - trasient error: caused by databse
 /// - fatal error: failure in parsing an invalid email
 #[instrument(skip_all, fields(newsletter_issue_id, subscriber_email))]
-async fn try_execute_task(
+pub async fn try_execute_task(
     pool: &MySqlPool,
     email_client: &EmailClient,
 ) -> Result<ExecutionOutcome, ExecutionError> {

@@ -10,6 +10,8 @@ use wiremock::MockServer;
 use zero2prod::{
     configuration::get_configuration,
     domain::UserId,
+    email_client::EmailClient,
+    issue_delivery_worker::{try_execute_task, ExecutionOutcome},
     routes::PasswordFormData,
     startup::Application,
     telementry::{get_subscriber, init_subscriber},
@@ -39,6 +41,7 @@ pub struct TestApp {
     pub test_user: TestUser,
     // `cookie_store` is enabled and `redirect` is disabled
     pub api_client: reqwest::Client,
+    pub email_client: EmailClient,
 }
 
 #[derive(Debug)]
@@ -56,6 +59,14 @@ pub struct ConfirmationLink {
 }
 
 impl TestApp {
+    pub async fn dispatch_all_pending_emails(&self) {
+        while let ExecutionOutcome::TaskCompleted =
+            try_execute_task(&self.db_pool, &self.email_client)
+                .await
+                .unwrap()
+        {}
+    }
+
     pub async fn post_subscriptions(&self, body: impl Into<reqwest::Body>) -> reqwest::Response {
         self.api_client
             .post(format!("{}/subscriptions", &self.address))
@@ -231,6 +242,8 @@ pub async fn spawn_test_app(pool: MySqlPool) -> TestApp {
         c
     };
 
+    let email_client = configuration.email_client.clone().client();
+
     let app = Application::build_with_db(configuration, pool)
         .await
         .expect("Failed to build the test application");
@@ -256,6 +269,7 @@ pub async fn spawn_test_app(pool: MySqlPool) -> TestApp {
         port,
         test_user,
         api_client,
+        email_client,
     }
 }
 

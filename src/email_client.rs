@@ -10,7 +10,9 @@ use tracing::instrument;
 
 use super::domain::SubscriberEmail;
 
+#[derive(Debug, Clone, Deserialize)]
 pub struct EmailClient {
+    #[serde(skip)]
     http_client: Client,
     base_url: Url,
     sender: SubscriberEmail,

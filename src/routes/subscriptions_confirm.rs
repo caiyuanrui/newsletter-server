@@ -1,5 +1,5 @@
 use axum::{
-    extract::{rejection::QueryRejection, Query, State},
+    extract::{Query, State},
     response::IntoResponse,
 };
 use hyper::StatusCode;
@@ -11,32 +11,24 @@ use crate::domain::UserId;
 
 #[instrument(name = "Confirm a pending subscriber", skip(params, db_pool))]
 pub async fn confirm(
-    params: Result<Query<Params>, QueryRejection>,
+    Query(params): Query<Params>,
     State(db_pool): State<MySqlPool>,
 ) -> impl IntoResponse {
-    match params {
-        Ok(Query(params)) => {
-            let subscriber_id = match get_subscriber_id_with_token(&params.token, &db_pool).await {
-                Ok(id) => id,
-                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-            };
+    let subscriber_id = match get_subscriber_id_with_token(&params.token, &db_pool).await {
+        Ok(id) => id,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
 
-            match subscriber_id {
-                Some(subscriber_id) => {
-                    if confirm_subscriber(&db_pool, subscriber_id).await.is_err() {
-                        return StatusCode::INTERNAL_SERVER_ERROR;
-                    }
-                }
-                None => return StatusCode::UNAUTHORIZED,
+    match subscriber_id {
+        Some(subscriber_id) => {
+            if confirm_subscriber(&db_pool, subscriber_id).await.is_err() {
+                return StatusCode::INTERNAL_SERVER_ERROR;
             }
-
-            StatusCode::OK
         }
-        Err(e) => {
-            tracing::error!("Failed to parse query: {e}");
-            StatusCode::BAD_REQUEST
-        }
+        None => return StatusCode::UNAUTHORIZED,
     }
+
+    StatusCode::OK
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -44,6 +36,7 @@ pub struct Params {
     pub token: String,
 }
 
+#[instrument(skip_all)]
 async fn get_subscriber_id_with_token(
     token: &str,
     pool: &MySqlPool,

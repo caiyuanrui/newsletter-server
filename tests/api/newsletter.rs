@@ -2,51 +2,13 @@ use fake::Fake;
 use serde::Serialize;
 use sqlx::MySqlPool;
 use uuid::Uuid;
-use wiremock::{matchers, Mock, MockBuilder, ResponseTemplate};
+use wiremock::{matchers, Mock, ResponseTemplate};
 
 use std::time::Duration;
 
 use crate::helpers::{
     assert_is_redirect_to, assert_publish_is_successful, spawn_test_app, ConfirmationLink, TestApp,
 };
-
-#[sqlx::test]
-async fn transient_errors_do_not_cause_duplicate_deliveries_on_retries(pool: MySqlPool) {
-    let app = spawn_test_app(pool).await;
-    let newsletter_request_body = newsletter_request_body();
-    // Two subscribers
-    create_confirmed_subscriber(&app).await;
-    create_confirmed_subscriber(&app).await;
-    app.test_user.login(&app).await;
-
-    // Email delivery fails for the second subscriber
-    when_sending_an_email()
-        .respond_with(ResponseTemplate::new(200))
-        .up_to_n_times(1)
-        .expect(1)
-        .mount(&app.email_server)
-        .await;
-    when_sending_an_email()
-        .respond_with(ResponseTemplate::new(500))
-        .up_to_n_times(1)
-        .expect(1)
-        .mount(&app.email_server)
-        .await;
-
-    // One of the subscriber delivery failed, the idempotency operation will roll back
-    let response = app.post_publish_newsletters(&newsletter_request_body).await;
-    assert_eq!(500, response.status().as_u16());
-
-    // Retry for submitting the form
-    when_sending_an_email()
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1)
-        .named("Delivery retry")
-        .mount(&app.email_server)
-        .await;
-    let response = app.post_publish_newsletters(&newsletter_request_body).await;
-    assert_eq!(303, response.status().as_u16());
-}
 
 #[sqlx::test]
 async fn concurrent_form_submission_is_handled_gracefully(pool: MySqlPool) {
@@ -79,6 +41,8 @@ async fn concurrent_form_submission_is_handled_gracefully(pool: MySqlPool) {
         response1.text().await.unwrap(),
         response2.text().await.unwrap()
     );
+
+    app.dispatch_all_pending_emails().await;
 }
 
 #[sqlx::test]
@@ -113,6 +77,8 @@ async fn newsletter_creation_is_idempotent(pool: MySqlPool) {
     assert_is_redirect_to(&response, "/admin/newsletters");
     let html_page = app.get_publish_newsletters_html().await;
     assert_publish_is_successful(&html_page);
+
+    app.dispatch_all_pending_emails().await;
 }
 
 #[sqlx::test]
@@ -127,13 +93,7 @@ async fn you_must_be_logged_in_to_see_the_send_newsletters_form(pool: MySqlPool)
 async fn you_must_be_logged_in_to_send_newsletters(pool: MySqlPool) {
     let app = spawn_test_app(pool).await;
 
-    let newsletter_request_body = NewsletterFormBuilder::new()
-        .with_title("Newsletter Title")
-        .with_text_content("Newsletter body as plain text")
-        .with_html_content("<p>Newsletter body as HTML</p>")
-        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
-        .into_json()
-        .unwrap();
+    let newsletter_request_body = newsletter_request_body();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/login");
 }
@@ -155,16 +115,11 @@ async fn newsletters_are_not_delivered_to_unconfirmed_subscribers(pool: MySqlPoo
     }))
     .await;
 
-    let newsletter_request_body = NewsletterFormBuilder::new()
-        .with_title("Newsletter Title")
-        .with_text_content("Newsletter body as plain text")
-        .with_html_content("<p>Newsletter body as HTML</p>")
-        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
-        .into_json()
-        .unwrap();
+    let newsletter_request_body = newsletter_request_body();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
 
     assert_is_redirect_to(&response, "/admin/newsletters");
+    app.dispatch_all_pending_emails().await;
 }
 
 #[sqlx::test]
@@ -185,15 +140,10 @@ async fn newsletters_are_delivered_to_confirmed_subscribers(pool: MySqlPool) {
     }))
     .await;
 
-    let newsletter_request_body = NewsletterFormBuilder::new()
-        .with_title("Newsletter Title")
-        .with_text_content("Newsletter body as plain text")
-        .with_html_content("<p>Newsletter body as HTML</p>")
-        .with_idempotency_key(Uuid::new_v4().to_string().as_str())
-        .into_json()
-        .unwrap();
+    let newsletter_request_body = newsletter_request_body();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
+    app.dispatch_all_pending_emails().await;
 }
 
 #[sqlx::test]
@@ -294,12 +244,7 @@ async fn succeed_to_publish_a_newsletter_form(pool: MySqlPool) {
     }))
     .await;
 
-    let newsletter_request_body = serde_json::json!({
-      "title": "Newsletter Title",
-      "html_content": "<p>Newsletter body as html</p>",
-      "text_content": "Newsletter body as plain text",
-      "idempotency_key": Uuid::new_v4().to_string()
-    });
+    let newsletter_request_body = newsletter_request_body();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
 
@@ -371,6 +316,7 @@ async fn create_confirmed_subscriber(app: &TestApp) {
         .unwrap();
 }
 
+/// This function will get blocked until all emails are dispatched.
 async fn send_a_newsletter_to_all_subscribers(app: &TestApp) -> u64 {
     let total_subscriber_nums = sqlx::query!(r#"SELECT COUNT(*) as total FROM subscriptions"#)
         .fetch_one(&app.db_pool)
@@ -383,18 +329,15 @@ async fn send_a_newsletter_to_all_subscribers(app: &TestApp) -> u64 {
         .expect(total_subscriber_nums)
         .mount_as_scoped(&app.email_server)
         .await;
-    let newsletter_request_body = serde_json::json!({
-      "title": "Newsletter Title",
-      "html_content": "<p>Newsletter body as html</p>",
-      "text_content": "Newsletter body as plain text",
-      "idempotency_key": Uuid::new_v4().to_string()
-    });
+    let newsletter_request_body = newsletter_request_body();
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
 
     assert_is_redirect_to(&response, "/admin/newsletters");
 
     let html_page = app.get_publish_newsletters_html().await;
     assert_publish_is_successful(&html_page);
+
+    app.dispatch_all_pending_emails().await;
 
     total_subscriber_nums
 }
@@ -474,9 +417,4 @@ fn newsletter_request_body() -> serde_json::Value {
         .with_idempotency_key(Uuid::new_v4().to_string().as_str())
         .into_json()
         .unwrap()
-}
-
-/// Short-hand for a common mocking setup.
-fn when_sending_an_email() -> MockBuilder {
-    Mock::given(matchers::path("/email")).and(matchers::method("POST"))
 }

@@ -1,13 +1,17 @@
 use axum::response::{Html, IntoResponse};
 use axum_messages::Messages;
 use hyper::StatusCode;
+use tracing::instrument;
 use uuid::Uuid;
 
 use std::fmt::Write;
 
+#[instrument(skip_all)]
 pub async fn publish_newsletter_form(messages: Messages) -> impl IntoResponse {
     let msg = messages.into_iter().fold(String::new(), |mut acc, item| {
-        _ = writeln!(acc, "<p><i>{}</i></p>", item.message);
+        if let Err(e) = writeln!(acc, "<p><i>{}</i></p>", item.message) {
+            tracing::error!(error.caused_by = ?e, error.message = %e, "Failed to write into messages");
+        }
         acc
     });
     let idempotency_key = Uuid::new_v4();

@@ -5,7 +5,11 @@ use serde::Deserialize;
 use serde_aux::field_attributes::{deserialize_bool_from_anything, deserialize_number_from_string};
 use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
 
-use crate::{appstate::HmacSecret, domain::SubscriberEmail, email_client::Url};
+use crate::{
+    appstate::HmacSecret,
+    domain::SubscriberEmail,
+    email_client::{EmailClient, Url},
+};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Settings {
@@ -51,6 +55,12 @@ impl EmailClientSettings {
 
     pub fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_milliseconds)
+    }
+
+    pub fn client(self) -> EmailClient {
+        let send_email = self.sender().expect("Invalid sender email address");
+        let timeout = self.timeout();
+        EmailClient::new(self.base_url, send_email, self.authorization_token, timeout)
     }
 }
 

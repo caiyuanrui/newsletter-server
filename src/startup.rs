@@ -6,6 +6,7 @@ use axum::{
     Router,
 };
 use axum_messages::MessagesManagerLayer;
+use hyper::Request;
 use secrecy::ExposeSecret;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use tower::ServiceBuilder;
@@ -16,6 +17,7 @@ use tower_sessions_redis_store::{
     fred::prelude::{ClientLike, Config, Pool},
     RedisStore,
 };
+use uuid::Uuid;
 
 use crate::{
     appstate::{AppState, HmacSecret},
@@ -73,7 +75,17 @@ fn run(
         )
         .layer(
             ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http())
+                .layer(
+                    TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
+                        let request_id = Uuid::new_v4();
+                        tracing::debug_span!(
+                          "http_request",
+                          method = ?request.method(),
+                          uri = ?request.uri(),
+                          request_id = ?request_id
+                        )
+                    }),
+                )
                 .layer(CorsLayer::permissive())
                 .layer(session_layer)
                 .layer(MessagesManagerLayer),
@@ -118,20 +130,9 @@ impl Application {
             .await
             .with_context(|| format!("Failed to bind tcp listener: {} is already in use", addr))?;
         let port = listener.local_addr().unwrap().port();
+
         // email client
-        let url = configuration
-            .email_client
-            .base_url
-            .as_str()
-            .try_into()
-            .expect("Failed to parse the url");
-        let sender_email = configuration
-            .email_client
-            .sender()
-            .expect("Failed to parse the email sender's name");
-        let timeout = configuration.email_client.timeout();
-        let authorization_token = configuration.email_client.authorization_token.clone();
-        let email_client = EmailClient::new(url, sender_email, authorization_token, timeout);
+        let email_client = configuration.email_client.client();
 
         let server = run(
             listener,
