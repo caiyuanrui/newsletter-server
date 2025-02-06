@@ -167,7 +167,7 @@ impl Application {
     }
 }
 
-fn get_connection_pool(config: &DatabaseSettings) -> MySqlPool {
+pub fn get_connection_pool(config: &DatabaseSettings) -> MySqlPool {
     MySqlPoolOptions::new()
         .acquire_timeout(Duration::from_secs(2))
         .connect_lazy_with(config.with_db())

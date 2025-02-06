@@ -3384,6 +3384,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]
@@ -3913,6 +3914,7 @@ dependencies = [
  "tracing-log 0.2.0",
  "tracing-subscriber",
  "unicode-segmentation",
+ "url",
  "urlencoding",
  "uuid",
  "validator",

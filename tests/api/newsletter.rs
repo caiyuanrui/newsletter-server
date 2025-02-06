@@ -6,7 +6,9 @@ use wiremock::{matchers, Mock, MockBuilder, ResponseTemplate};
 
 use std::time::Duration;
 
-use crate::helpers::{assert_is_redirect_to, spawn_test_app, ConfirmationLink, TestApp};
+use crate::helpers::{
+    assert_is_redirect_to, assert_publish_is_successful, spawn_test_app, ConfirmationLink, TestApp,
+};
 
 #[sqlx::test]
 async fn transient_errors_do_not_cause_duplicate_deliveries_on_retries(pool: MySqlPool) {
@@ -104,13 +106,13 @@ async fn newsletter_creation_is_idempotent(pool: MySqlPool) {
     assert_is_redirect_to(&response, "/admin/newsletters");
 
     let html_page = app.get_publish_newsletters_html().await;
-    assert!(html_page.contains("<p><i>The newsletter issue has been published!</i></p>"));
+    assert_publish_is_successful(&html_page);
 
     // Submit newsletter form again!
     let response = app.post_publish_newsletters(&newsletter_request_body).await;
     assert_is_redirect_to(&response, "/admin/newsletters");
     let html_page = app.get_publish_newsletters_html().await;
-    assert!(html_page.contains("<p><i>The newsletter issue has been published!</i></p>"));
+    assert_publish_is_successful(&html_page);
 }
 
 #[sqlx::test]
@@ -302,7 +304,7 @@ async fn succeed_to_publish_a_newsletter_form(pool: MySqlPool) {
     assert_is_redirect_to(&response, "/admin/newsletters");
 
     let html_page = app.get_publish_newsletters_html().await;
-    assert!(html_page.contains("<p><i>The newsletter issue has been published!</i></p>"))
+    assert_publish_is_successful(&html_page);
 }
 
 #[sqlx::test]
@@ -392,7 +394,7 @@ async fn send_a_newsletter_to_all_subscribers(app: &TestApp) -> u64 {
     assert_is_redirect_to(&response, "/admin/newsletters");
 
     let html_page = app.get_publish_newsletters_html().await;
-    assert!(html_page.contains("The newsletter issue has been published!"));
+    assert_publish_is_successful(&html_page);
 
     total_subscriber_nums
 }

@@ -227,7 +227,7 @@ pub async fn spawn_test_app(pool: MySqlPool) -> TestApp {
             .expect("Failed to get the current database name")
             .to_owned();
         c.application.port = 0;
-        c.email_client.base_url = email_server.uri();
+        c.email_client.base_url = email_server.uri().as_str().try_into().unwrap();
         c
     };
 
@@ -269,6 +269,14 @@ pub fn assert_is_redirect_to(response: &reqwest::Response, location: &str) {
             .get("Location")
             .expect("Location is missing in headers")
     )
+}
+
+#[track_caller]
+pub fn assert_publish_is_successful(html_page: &str) {
+    assert!(html_page.contains(
+        "The newsletter issue has been accepted - \
+emails will go out shortly!",
+    ))
 }
 
 pub fn generate_random_change_password_form() -> serde_json::Value {

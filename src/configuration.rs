@@ -1,12 +1,13 @@
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
+use serde::Deserialize;
 use serde_aux::field_attributes::{deserialize_bool_from_anything, deserialize_number_from_string};
 use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
 
-use crate::{appstate::HmacSecret, domain::SubscriberEmail};
+use crate::{appstate::HmacSecret, domain::SubscriberEmail, email_client::Url};
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
@@ -35,9 +36,9 @@ pub struct ApplicationSettings {
     pub hmac_secret: HmacSecret,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct EmailClientSettings {
-    pub base_url: String,
+    pub base_url: Url,
     sender_email: String,
     pub authorization_token: SecretString,
     timeout_milliseconds: u64,

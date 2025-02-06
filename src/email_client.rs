@@ -5,6 +5,7 @@ use std::{
 
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
+use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::domain::SubscriberEmail;
@@ -16,7 +17,8 @@ pub struct EmailClient {
     authorization_token: SecretString,
 }
 
-pub struct Url(reqwest::Url);
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Url(url::Url);
 
 impl Deref for Url {
     type Target = reqwest::Url;
@@ -32,12 +34,9 @@ impl DerefMut for Url {
 }
 
 impl TryFrom<&str> for Url {
-    type Error = String;
+    type Error = url::ParseError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match reqwest::Url::parse(value) {
-            Ok(url) => Ok(Self(url)),
-            Err(e) => Err(format!("Failed to parse the url: {}", e)),
-        }
+        reqwest::Url::parse(value).map(Self)
     }
 }
 

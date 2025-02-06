@@ -1,5 +1,9 @@
+use std::fmt::{Debug, Display};
+
+use tokio::task::JoinError;
 use zero2prod::{
     configuration::get_configuration,
+    issue_delivery_worker::run_worker_loop_until_stopped,
     startup::Application,
     telementry::{get_subscriber, init_subscriber},
 };
@@ -14,7 +18,37 @@ async fn main() -> Result<(), anyhow::Error> {
         "Server is running on {}:{}",
         &configuration.application.base_url, configuration.application.port
     );
-    let app = Application::build(configuration).await?;
+    let app = Application::build(configuration.clone()).await?;
 
-    app.run().await
+    let application_task = tokio::spawn(app.run());
+    let worker_task = tokio::spawn(run_worker_loop_until_stopped(configuration));
+
+    tokio::select! {
+      o = application_task => report_exit("task_name", o),
+      o = worker_task => report_exit("task_name", o)
+    }
+
+    Ok(())
+}
+
+fn report_exit(task_name: &str, outcome: Result<Result<(), impl Debug + Display>, JoinError>) {
+    match outcome {
+        Ok(Ok(())) => tracing::info!("{} has exited", task_name),
+        Ok(Err(e)) => {
+            tracing::error!(
+              error.cause_chain=?e,
+              error.message=%e,
+              "{} failed",
+              task_name
+            )
+        }
+        Err(e) => {
+            tracing::error!(
+              error.cause_chain=?e,
+              error.message=%e,
+              "{}'s task failed to complete",
+              task_name
+            )
+        }
+    }
 }
