@@ -27,7 +27,8 @@ pub async fn publish_newsletter_form(messages: Messages) -> impl IntoResponse {
 </head>
 <body>
   {msg}
-  <form action="/admin/newsletters" method="post" value="{idempotency_key}">
+  <form action="/admin/newsletters" method="post">
+    <input type="hidden" name="idempotency_key" value="{idempotency_key}" />
     <label>Newsletter Title
     <br />
       <textarea name="title" rows="10" cols="50"></textarea>
